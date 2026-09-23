@@ -1,0 +1,3 @@
+# CONFIGURATION RESEAU KASHFLOW MANAGER 
+URL_API - https://portfolio-python-entreprise.onrender.com 
+CLE_API - SERGE_TECH_998877
