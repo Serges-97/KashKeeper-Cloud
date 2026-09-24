@@ -772,9 +772,9 @@ def ouvrir_historique_caissiere():
 # =====================================================================
 
 def verifier_acces():
-    """Valide la session employé et exige le code d'usine serge2026 pour le premier démarrage."""
+    """Valide la session employé et applique le contrôle de licence Cloud sans faille de triche."""
     global SESSION_UTILISATEUR, NOM_CAISSIERE_ACTIVE
-    user = entree_user.get().strip()
+    user = entree_user.get().strip().lower()
     pwd = entree_password.get().strip()
 
     if not user or not pwd:
@@ -782,40 +782,80 @@ def verifier_acces():
         return
 
     try:
-        # Vérification physique de la présence de la base de données sur le bureau
-        base_existe_sur_bureau = os.path.exists(data_base.DB_NAME)
+        # Allumage préventif des structures locales SQLite
+        data_base.initialisation_systeme()
 
-        # 🟢 CAS 1 : La base n'existe pas encore (Premier allumage de l'histoire du PC)
-        if not base_existe_sur_bureau:
-            # 🔐 SÉCURITÉ CONSTRUCTEUR STRICTE : On exige obligatoirement serge2026 au premier login
+        # Lecture immédiate en base de données locale pour vérifier l'état
+        connexion = sqlite3.connect(data_base.DB_NAME)
+        curseur = connexion.cursor()
+        curseur.execute("SELECT mot_de_passe FROM employes WHERE identifiant = 'gerant'")
+        ligne_pwd = curseur.fetchone()
+        
+        curseur.execute("SELECT valeur FROM configuration WHERE cle = 'nom_boutique'")
+        ligne_boutique = curseur.fetchone()
+        connexion.close()
+
+        mot_de_passe_actuel_db = ligne_pwd[0] if ligne_pwd else "serge2026"
+        boutique_installee = ligne_boutique is not None
+
+        # 🟢 ASSISTANT 1ER DEMARRAGE (Code d'usine serge2026 exigé)
+        if not boutique_installee and mot_de_passe_actuel_db == "serge2026":
             if user == "gerant" and pwd == "serge2026":
-                nom_magasin = simpledialog.askstring("Installation d'Usine - Étape 1/2", "Bienvenue chez KashKeeper !\n\nVeuillez entrer le NOM OFFICIEL de votre entreprise :")
+                nom_magasin = simpledialog.askstring("Configuration Boutique - Étape 1/2", "Bienvenue chez KashKeeper !\n\nVeuillez entrer le NOM OFFICIEL de votre entreprise :")
                 if not nom_magasin or not nom_magasin.strip():
                     messagebox.showwarning("Incomplet", "Le nom de l'entreprise est exigé.")
                     return
 
-                creer_code = simpledialog.askstring("Installation d'Usine - Étape 2/2", "Veuillez définir votre MOT DE PASSE secret Administrateur définitif :")
-                if not creer_code or len(creer_code.strip()) < 6:
-                    messagebox.showerror("Erreur", "Le mot de passe exige un minimum de 6 caractères.")
+                creer_code = simpledialog.askstring("Configuration Boutique - Étape 2/2", "Veuillez définir votre MOT DE PASSE personnalisé définitif :")
+                if not creer_code or len(creer_code.strip()) < 6 or creer_code.strip() == "serge2026":
+                    messagebox.showerror("Erreur", "Le mot de passe exige un minimum de 6 caractères et doit être différent de 'serge2026'.")
                     return
 
-                # Initialisation de la base physique à côté du .exe et enregistrement des paramètres choisis
-                data_base.initialisation_systeme()
                 data_base.enregistrer_nom_boutique_sql(nom_magasin.strip())
                 data_base.configurer_compte_gerant_sql(creer_code.strip())
                 
-                messagebox.showinfo("Succès", f"Félicitations !\nL'entreprise '{nom_magasin.strip().upper()}' est activée.\n\nConnectez-vous maintenant avec votre mot de passe définitif.")
-                
-                # On vide les champs pour forcer la reconnexion avec le nouveau mot de passe
+                messagebox.showinfo("Succès", f"Félicitations !\nL'entreprise '{nom_magasin.strip().upper()}' est activée.\n\nConnectez-vous maintenant avec votre nouveau mot de passe.")
                 entree_password.delete(0, tk.END)
                 entree_password.focus()
                 return
             else:
-                messagebox.showerror("Accès Refusé", "Code d'initialisation d'usine incorrect.\n\nVeuillez entrer le mot de passe de sécurité par défaut.")
+                messagebox.showerror("Accès Refusé", "Code d'initialisation d'usine incorrect.")
                 return
 
-        # 🟢 CAS 2 : La base de données existe déjà sur le bureau (Utilisation quotidienne)
+        if pwd == "serge2026" and mot_de_passe_actuel_db != "serge2026":
+            messagebox.showerror("Accès Refusé", "Ce mot de passe d'usine a expiré après la configuration initiale.")
+            return
+
+        # 🟢 CONTRÔLE INTERCONNEXION SAAS (Vérification de la licence sur Render)
         if data_base.verifier_identifiants_sql(user, pwd):
+            try:
+                # Appel sécurisé à la route que nous venons d'écrire sur Render
+                reponse_licence = requests.get(
+                    f"{URL_API_KASHFLOW}/licence/statut", 
+                    headers={"X-API-Key": CLE_API_KASHFLOW}, 
+                    timeout=5
+                )
+                
+                if reponse_licence.status_code == 200:
+                    infos = reponse_licence.json()
+                    statut_serveur = infos.get("statut", "actif")
+                    jours_restants = infos.get("jours_restants", 0)
+
+                    # Cas A : Blocage strict (Tolérance dépassée)
+                    if statut_serveur == "expire":
+                        messagebox.showerror("Abonnement Expiré", "🚨 COMPTOIR VERROUILLÉ !\n\nVotre période d'abonnement et de tolérance est arrivée à terme. Veuillez régulariser en cliquant sur 'PAYER ABONNEMENT' en bas à droite.")
+                        return
+                    
+                    # Cas B : Gestion des imprévus (Période de grâce de 3 jours)
+                    elif statut_serveur == "grace":
+                        messagebox.showwarning("Avertissement de Tolérance", f"⚠️ ALERTE FINANCIÈRE :\n\nVotre abonnement est expiré. Mode tolérance activé pour {jours_restants} jour(s).\n\nVeuillez recharger pour éviter la coupure du comptoir.")
+
+            except Exception as e:
+                # En cas de coupure de courant/Internet, on autorise l'accès local pour ne pas bloquer le commerce.
+                # Dès que la box Internet redémarrera, le filtre Cloud s'appliquera automatiquement.
+                logging.warning("Vérification licence différée (mode hors-ligne) : %s", e)
+
+            # Si la licence est OK ou tolérée temporairement hors-ligne, on ouvre le comptoir
             SESSION_UTILISATEUR = str(user).strip().lower()
             NOM_CAISSIERE_ACTIVE = str(user).strip().lower()
             messagebox.showinfo("Accès Autorisé", f"Bienvenue {SESSION_UTILISATEUR.upper()} !")
@@ -823,21 +863,35 @@ def verifier_acces():
             ouvrir_comptoir_facturation()
         else:
             messagebox.showerror("Accès Refusé", "Identifiant ou mot de passe incorrect.")
+            
     except Exception as e:
         messagebox.showerror("Erreur", f"Erreur système : {str(e)}")
 
 
-
 def recuperer_mot_de_passe_oublie():
-    cle_saisie = simpledialog.askstring("Sécurité Constructeur", "Veuillez entrer la clé de secours fournie par l'ingénieur Serge :")
-    if cle_saisie == CLE_MASTER_SERGE:
-        nouveau_code = simpledialog.askstring("Réinitialisation", "Clé correcte !\nTapez votre nouveau mot de passe gérant :")
-        if nouveau_code and nouveau_code.strip():
-            data_base.configurer_compte_gerant_sql(nouveau_code.strip())
-            messagebox.showinfo("Succès", "Mot de passe réinitialisé ! Connectez-vous.")
-    elif cle_saisie is not None:
-        messagebox.showerror("Accès Refusé", "Clé de secours invalide.")
+    """Permet la récupération par clé master uniquement si le profil de base a été configuré."""
+    try:
+        connexion = sqlite3.connect(data_base.DB_NAME)
+        curseur = connexion.cursor()
+        curseur.execute("SELECT mot_de_passe FROM employes WHERE identifiant = 'gerant'")
+        res = curseur.fetchone()
+        connexion.close()
 
+        # 🛑 BLOCAGE DE LA FAILLE : Interdit si l'utilisateur n'a pas encore fait le premier démarrage
+        if res and res[0] == "serge2026":
+            messagebox.showwarning("Action Impossible", "Veuillez d'abord vous connecter normalement avec le code d'usine pour configurer la boutique.")
+            return
+
+        cle_saisie = simpledialog.askstring("Sécurité Constructeur", "Veuillez entrer la clé de secours fournie par l'ingénieur Serge :")
+        if cle_saisie == CLE_MASTER_SERGE:
+            nouveau_code = simpledialog.askstring("Réinitialisation", "Clé correcte !\nTapez votre nouveau mot de passe gérant :")
+            if nouveau_code and nouveau_code.strip():
+                data_base.configurer_compte_gerant_sql(nouveau_code.strip())
+                messagebox.showinfo("Succès", "Mot de passe réinitialisé ! Connectez-vous.")
+        elif cle_saisie is not None:
+            messagebox.showerror("Accès Refusé", "Clé de secours invalide.")
+    except Exception as e:
+        messagebox.showerror("Erreur", f"Erreur système : {str(e)}")
 
 def action_telecharger_mise_a_jour():
     """Interroge le Cloud Render, télécharge le nouveau code et remplace le fichier actuel à chaud."""
@@ -878,6 +932,65 @@ def action_telecharger_mise_a_jour():
         messagebox.showerror("Échec réseau", f"Impossible de joindre le serveur Cloud pour la mise à jour :\n{e}")
 
 
+def ouvrir_fenetre_paiement():
+    """Fenêtre d'activation de ticket autonome 30 jours (Style carte de recharge)."""
+    def action_valider_ticket_recharge():
+        code_saisi = entree_ticket.get().strip().upper()
+        if not code_saisi:
+            messagebox.showwarning("Champ vide", "Veuillez saisir votre code de ticket.")
+            return
+
+        try:
+            # Envoi du ticket vers Render pour validation automatique
+            reponse = requests.post(
+                f"{URL_API_KASHFLOW}/licence/recharger",
+                json={"code_ticket": code_saisi},
+                headers={"X-API-Key": CLE_API_KASHFLOW},
+                timeout=6
+            )
+            
+            if reponse.status_code == 200:
+                donnees = reponse.json()
+                messagebox.showinfo("Succès Absolu", f"🎉 {donnees.get('message')}\n\nNouvelle échéance : {donnees.get('nouvelle_echeance')}\nVotre comptoir est rechargé avec succès pour 30 jours !")
+                fenetre_paye.destroy()
+            else:
+                messagebox.showerror("Échec", "Code de ticket invalide, expiré ou déjà utilisé.")
+        except Exception as e:
+            messagebox.showerror("Erreur Réseau", f"Impossible de joindre le Cloud pour valider le ticket :\n{e}")
+
+    fenetre_paye = Toplevel(FENETRE_PRINCIPALE_LOGIN)
+    fenetre_paye.title("💳 Activation de l'Abonnement")
+    fenetre_paye.geometry("380x360")
+    fenetre_paye.configure(bg="#1e293b")
+    fenetre_paye.resizable(False, False)
+    fenetre_paye.grab_set()
+
+    tk.Label(fenetre_paye, text="RÉGULARISATION DE L'ABONNEMENT", font=("Helvetica", 11, "bold"), bg="#1e293b", fg="#f59e0b").pack(pady=12)
+    
+    texte_instructions = (
+        "Pour réactiver votre comptoir KashKeeper (30 jours),\n"
+        "veuillez effectuer votre dépôt vers :\n\n"
+        "📱 Orange Money : 6 86 08 15 12 (serges desire) \n"
+        "📱 MTN MoMo : 83 10 63 38 (prince junior)\n"
+        "💳 Montant : 23 $ ( 14000 FCFA)\n\n"
+        "Une fois le dépôt fait, vous recevrez instantanément votre\n"
+        "code de ticket par WhatsApp."
+    )
+    tk.Label(fenetre_paye, text=texte_instructions, font=("Helvetica", 9), bg="#1e293b", fg="#cbd5e1", justify=tk.LEFT).pack(padx=20, pady=5)
+    
+    # Zone de saisie du ticket autonome
+    cadre_code = tk.Frame(fenetre_paye, bg="#1e293b")
+    cadre_code.pack(fill=tk.X, padx=25, pady=10)
+    
+    tk.Label(cadre_code, text="Saisir le Code de Ticket reçu :", font=("Helvetica", 9, "bold"), bg="#1e293b", fg="white").pack(anchor=tk.W)
+    entree_ticket = tk.Entry(cadre_code, font=("Helvetica", 11), bd=2, justify=tk.CENTER)
+    entree_ticket.pack(fill=tk.X, pady=4)
+    entree_ticket.insert(0, "KP-2026-")
+
+    tk.Button(fenetre_paye, text="🎟️ RECHARGER MON COMPTOIR", bg="#10b981", fg="white", font=("Helvetica", 10, "bold"), command=action_valider_ticket_recharge, pady=6).pack(fill=tk.X, padx=25, pady=5)
+    tk.Button(fenetre_paye, text="❌ FERMER", bg="#475569", fg="white", font=("Helvetica", 8, "bold"), command=fenetre_paye.destroy).pack(pady=5)
+
+
 # --- POINT DE DÉMARRAGE DE LA RACINE UNIQUE ---
 login = tk.Tk()
 FENETRE_PRINCIPALE_LOGIN = login
@@ -907,37 +1020,30 @@ entree_password.pack(fill=tk.X, pady=5)
 entree_user.bind("<Return>", lambda event: entree_password.focus())
 entree_password.bind("<Return>", lambda event: verifier_acces())
 
-# 1. Bouton d'accès principal au comptoir
-tk.Button(
-    login, 
-    text="🔓 ACCÉDER AU COMPTOIR", 
-    font=("Helvetica", 11, "bold"), 
-    bg="#3b82f6", 
-    fg="white", 
-    command=verifier_acces
-).pack(fill=tk.X, padx=30, pady=12)
+# 1. Bouton d'accès principal
+tk.Button(login, text="🔓 ACCÉDER AU COMPTOIR", font=("Helvetica", 11, "bold"), bg="#3b82f6", fg="white", command=verifier_acces).pack(fill=tk.X, padx=30, pady=12)
 
-# 2. 🟢 INTERCONNEXION SAAS : Bouton de mise à jour à distance ancré sur la page de connexion
-tk.Button(
-    login, 
-    text="🔄 VÉRIFIER LES MISES À JOUR", 
-    font=("Helvetica", 10, "bold"), 
-    bg="#475569", 
-    fg="white", 
-    command=action_telecharger_mise_a_jour
-).pack(fill=tk.X, padx=30, pady=5)
+# 2. Bouton de mise à jour
+tk.Button(login, text="🔄 VÉRIFIER LES MISES À JOUR", font=("Helvetica", 10, "bold"), bg="#475569", fg="white", command=action_telecharger_mise_a_jour).pack(fill=tk.X, padx=30, pady=5)
 
 # 3. Bouton mot de passe oublié
-tk.Button(
-    login, 
-    text="❓ Mot de passe oublié / Réinitialiser", 
-    font=("Helvetica", 9, "underline"), 
+tk.Button(login, text="❓ Mot de passe oublié / Réinitialiser", font=("Helvetica", 9, "underline"), bg="#1e293b", fg="#94a3b8", bd=0, command=recuperer_mot_de_passe_oublie, cursor="hand2").pack(pady=5)
+
+# 🚀 ANCRAGE EXTRÊME INFERIEUR DROIT DU BOUTON ABONNEMENT MENSUEL
+cadre_bas = tk.Frame(login, bg="#1e293b")
+cadre_bas.pack(fill=tk.X, side=tk.BOTTOM, padx=15, pady=10)
+
+btn_abonnement = tk.Button(
+    cadre_bas, 
+    text="💳 PAYER ABONNEMENT", 
+    font=("Helvetica", 8, "bold", "underline"), 
     bg="#1e293b", 
-    fg="#94a3b8", 
+    fg="#f59e0b", 
     bd=0, 
-    command=recuperer_mot_de_passe_oublie, 
-    cursor="hand2"
-).pack(pady=10)
+    cursor="hand2",
+    command=ouvrir_fenetre_paiement
+)
+btn_abonnement.pack(side=tk.RIGHT)
 
 login.mainloop()
 
