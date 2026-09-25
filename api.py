@@ -263,7 +263,7 @@ CAMPAY_BASE_URL = "https://campay.net"
 
 # Dictionnaire de suivi des licences (Clé API de la boutique -> Date de fin)
 BASE_LICENCES_CLOUD = {
-    "SERGE_TECH_998877": "31/10/2026"
+    "SERGE_TECH_998877": "01/01/2026"
 }
 
 def obtenir_token_authentification_campay():
