@@ -10,6 +10,9 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+import requests
+from datetime import datetime, timedelta
+from fastapi import Header, HTTPException, Depends
 
 # 🔑 SÉCURITÉ CONSTRUCTEUR : Forcer Render à cibler le bon dossier physique
 DOSSIER_DU_FICHIER = os.path.dirname(os.path.abspath(__file__))
@@ -247,102 +250,82 @@ def api_distribuer_mise_a_jour():
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-# =====================================================================
-# ENGINE CLOUD KASHKEEPER - EXTENSION SAAS ABONNEMENT & TICKETS AUTONOMES
-# =====================================================================
-from datetime import datetime, timedelta
 
-# Dictionnaire de simulation d'usine pour stocker les licences de tes clients sur Render
-# Clé : Clé API de la boutique -> Valeur : Date de fin de l'abonnement initial
+# =====================================================================
+# ENGINE CLOUD KASHKEEPER - MODULE PASSERELLE DE PAIEMENT AUTOMATIQUE
+# =====================================================================
+
+# 🟢 ZONES À COMPLÉTER : Récupère ces deux clés sur ton tableau de bord DÉMO Campay
+# (Onglet Intégration / API Keys sur ton téléphone ou PC)
+CAMPAY_USERNAME = os.getenv("CAMPAY_USERNAME", "METS_ICI_TON_APP_USERNAME_DE_TEST")
+CAMPAY_PASSWORD = os.getenv("CAMPAY_PASSWORD", "METS_ICI_TON_APP_PASSWORD_DE_TEST")
+
+# URL officielle du serveur de test Campay (Sandbox)
+CAMPAY_BASE_URL = "https://campay.net"
+
+# Dictionnaire de suivi des licences (Clé API de la boutique -> Date de fin)
 BASE_LICENCES_CLOUD = {
-    "SERGE_TECH_998877": "31/10/2026"  # Exemple de date de fin pour ton test
+    "SERGE_TECH_998877": "31/10/2026"
 }
 
-# Liste d'usine des Tickets de Recharge de 30 jours que tu auras générés à l'avance
-# Dès qu'un ticket est utilisé par une boutique, il est supprimé pour éviter la fraude
-TICKETS_RECHARGE_VALIDES = [
-    "KP-2026-X91A-MOMO",
-    "KP-2026-B827-ORNG",
-    "KP-2026-Z443-PAYS",
-    "KP-2026-L112-SERG"
-]
-
-@app.get("/licence/statut", dependencies=[Depends(verifier_cle_api)])
-def api_verifier_licence_magasin(x_api_key: str = Header(...)):
-    """
-    🛡️ LOGIQUE ANTI-FRAUDE CLOUD :
-    Calcule le temps restant, gère les 3 jours de grâce et renvoie l'autorisation.
-    """
-    cle_propre = x_api_key.strip()
-    date_fin_texte = BASE_LICENCES_CLOUD.get(cle_propre)
-    
-    # Si la boutique n'a pas de date enregistrée, on lui offre 30 jours de bienvenue
-    if not date_fin_texte:
-        date_bienvenue = (datetime.now() + timedelta(days=30)).strftime("%d/%m/%Y")
-        BASE_LICENCES_CLOUD[cle_propre] = date_bienvenue
-        return {"statut": "actif", "jours_restants": 30, "message": "Période de bienvenue activée."}
-        
+def obtenir_token_authentification_campay():
+    """Demande un jeton d'accès temporaire (Token) à l'API Campay."""
+    url = f"{CAMPAY_BASE_URL}/token/"
+    payload = {
+        "username": CAMPAY_USERNAME,
+        "password": CAMPAY_PASSWORD
+    }
     try:
-        date_expiration = datetime.strptime(date_fin_texte, "%d/%m/%Y")
-        date_actuelle = datetime.now()
-        
-        # Calcul de la différence de jours (positive ou négative)
-        difference = (date_expiration - date_actuelle).days + 1
-        
-        if difference >= 0:
-            return {"statut": "actif", "jours_restants": difference, "message": "Abonnement en cours."}
-            
-        # 🟢 GESTION DES IMPRÉVUS : Période de grâce humaine de 3 jours
-        elif -3 <= difference < 0:
-            jours_tolerance = 3 + difference # Donne le nombre de jours restants (2, 1 ou 0)
-            return {
-                "statut": "grace", 
-                "jours_restants": jours_tolerance, 
-                "message": f"Retard de paiement détecté. Mode tolérance actif : il vous reste {jours_tolerance} jours."
-            }
-        
-        # Blocage strict si la tolérance de 3 jours est dépassée
-        else:
-            return {"statut": "expire", "jours_restants": 0, "message": "Accès coupé. Veuillez régulariser votre abonnement."}
-            
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erreur calcul de licence : {str(e)}")
+        reponse = requests.post(url, json=payload, timeout=8)
+        if reponse.status_code == 200:
+            return reponse.json().get("token")
+        return None
+    except Exception:
+        return None
 
-
-@app.post("/licence/recharger", dependencies=[Depends(verifier_cle_api)])
-def api_recharger_licence_autonome(payload: dict, x_api_key: str = Header(...)):
-    """
-    🎟️ VALIDATEUR DE TICKETS AUTONOME :
-    Vérifie le code du ticket envoyé par le client et prolonge son accès de 30 jours.
-    """
-    cle_propre = x_api_key.strip()
-    ticket_saisi = payload.get("code_ticket", "").strip().upper()
+@app.post("/licence/collecter-momo", dependencies=[Depends(verifier_cle_api)])
+def api_declencher_collecte_momo(payload: dict, x_api_key: str = Header(...)):
+    """📲 DÉCLENCHEUR USSD CAMPAY : Ordonne le prélèvement de 14 000 FCFA."""
+    cle_boutique = x_api_key.strip()
+    numero_telephone = payload.get("numero", "").strip()
     
-    if not ticket_saisi:
-        raise HTTPException(status_code=422, detail="Le code du ticket est requis.")
+    if not numero_telephone or len(numero_telephone) < 9:
+        raise HTTPException(status_code=422, detail="Numéro Mobile Money camerounais invalide.")
         
-    # 🟢 VÉRIFICATION DU TICKET : Si le code est dans la liste, on valide
-    if ticket_saisi in TICKETS_RECHARGE_VALIDES:
-        # On supprime immédiatement le ticket de la liste pour qu'il ne soit plus jamais réutilisable
-        TICKETS_RECHARGE_VALIDES.remove(ticket_saisi)
+    if not numero_telephone.startswith("+"):
+        if numero_telephone.startswith("237"):
+            numero_telephone = f"+{numero_telephone}"
+        else:
+            numero_telephone = f"+237{numero_telephone}"
+
+    token_campay = obtenir_token_authentification_campay()
+    if not token_campay:
+        raise HTTPException(status_code=500, detail="Impossible de s'authentifier auprès de la passerelle Campay.")
+
+    url_collecte = f"{CAMPAY_BASE_URL}/collect/"
+    entetes = {
+        "Authorization": f"Token {token_campay}",
+        "Content-Type": "application/json"
+    }
+    
+    donnees_collecte = {
+        "amount": "1",
+        "currency": "XAF",
+        "from": numero_telephone,
+        "description": f"Renouvellement Licence KashKeeper - Clé {cle_boutique[:8]}",
+        "external_reference": cle_boutique
+    }
+
+    try:
+        reponse = requests.post(url_collecte, json=donnees_collecte, headers=entetes, timeout=10)
         
-        # Récupération de la date actuelle ou de la date de fin pour cumuler les 30 jours
-        date_actuelle_db = BASE_LICENCES_CLOUD.get(cle_propre)
-        try:
-            date_base = datetime.strptime(date_actuelle_db, "%d/%m/%Y")
-            # Si le client était déjà expiré, on repart de la date d'aujourd'hui
-            if date_base < datetime.now():
-                date_base = datetime.now()
-        except Exception:
-            date_base = datetime.now()
-            
-        nouvelle_date_fin = (date_base + timedelta(days=30)).strftime("%d/%m/%Y")
-        BASE_LICENCES_CLOUD[cle_propre] = nouvelle_date_fin
-        
-        return {
-            "statut": "Succès",
-            "message": "Félicitations ! Votre ticket de recharge a été validé.",
-            "nouvelle_echeance": nouvelle_date_fin
-        }
-    else:
-        raise HTTPException(status_code=403, detail="Code de ticket invalide ou déjà utilisé. Opération annulée.")
+        # 🟢 RÉPARÉ ET SÉCURISÉ : Gestion des codes de succès 200 et 201
+        if reponse.status_code in [200, 201]:
+            return {
+                "statut": "SUCCESS", 
+                "reference_transaction": reponse.json().get("reference"),
+                "message": "Demande de retrait USSD poussée avec succès sur le téléphone."
+            }
+        raise HTTPException(status_code=400, detail=f"Refus Campay : {reponse.text}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erreur d'interconnexion passerelle : {str(e)}")

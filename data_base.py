@@ -28,7 +28,7 @@ logging.basicConfig(
 )
 
 def initialisation_systeme():
-    """Initialise l'architecture SQLite complète pour le fonctionnement Multi-Postes."""
+    """Initialise l'architecture SQLite complète avec les produits d'usine et le code serge2026."""
     connexion = sqlite3.connect(DB_NAME)
     curseur = connexion.cursor()
     
@@ -98,16 +98,24 @@ def initialisation_systeme():
     )
     """)
     
-    # Produits électroniques injectés à l'allumage d'usine
+    # 📦 PRODUITS ÉLECTRONIQUES CONSERVÉS À L'ALLUMAGE D'USINE
     produits_usine = [
         ("tecno", 10, 0),
-        
     ]
     for p in produits_usine:
         curseur.execute("INSERT OR IGNORE INTO stocks (modele, quantite_dispo, ventes_cumulees) VALUES (?, ?, ?)", p)
+    
+    # 🟢 SÉCURITÉ CONSTRUCTEUR : Si le compte gérant n'existe pas, on injecte 'serge2026' d'office
+    curseur.execute("SELECT * FROM employes WHERE identifiant = 'gerant'")
+    if curseur.fetchone() is None:
+        curseur.execute("""
+        INSERT INTO employes (id, identifiant, mot_de_passe, applique_tva)
+        VALUES (1, 'gerant', 'serge2026', 1)
+        """)
         
     connexion.commit()
     connexion.close()
+
 # =====================================================================
 # MODULE 1 : data_base.py (Version Multi-Postes Interconnectée - 2 SUR 3)
 # =====================================================================
@@ -372,3 +380,17 @@ def forcer_mise_a_jour_stock_local(modele_article, nouvelle_quantite):
     except Exception as e:
         logging.error("Erreur forçage stock local : %s", e)
         return False
+def obtenir_registre_ventes_brutes():
+    """Extrait l'intégralité du registre comptable des ventes pour l'exportation Excel."""
+    connexion = sqlite3.connect(DB_NAME)
+    curseur = connexion.cursor()
+    # Sélection ordonnée des colonnes essentielles
+    curseur.execute("""
+        SELECT id, client, article, description_unique, montant_ht, tva, total_ttc, 
+               caissiere, jour || '/' || mois || '/' || annee, heure, 
+               CASE WHEN synchro = 1 THEN 'OUI' ELSE 'NON' END 
+        FROM ventes ORDER BY id DESC
+    """)
+    lignes = curseur.fetchall()
+    connexion.close()
+    return lignes

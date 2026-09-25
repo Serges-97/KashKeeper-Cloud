@@ -302,6 +302,44 @@ def ouvrir_panneau_historique():
         messagebox.showerror("Accès Interdit", "Seul le gérant a accès aux rapports financiers.")
         return
 
+    def action_exporter_registre_excel():
+        """Génère un fichier CSV (Excel) haute clarté directement sur le bureau du gérant."""
+        import csv
+        import sys
+        
+        # Détermination de l'emplacement dynamique du bureau de l'utilisateur
+        bureau_pc = os.path.join(os.path.expanduser("~"), "Desktop")
+        if not os.path.exists(bureau_pc):
+            bureau_pc = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
+            
+        horodatage = datetime.now().strftime("%d_%m_%Y_%H%M")
+        nom_fichier_csv = os.path.join(bureau_pc, f"KashKeeper_Rapport_Ventes_{horodatage}.csv")
+        
+        try:
+            ventes_brutes = data_base.obtenir_registre_ventes_brutes()
+            if not ventes_brutes:
+                messagebox.showwarning("Registre vide", "Aucune transaction enregistrée en base pour le moment.")
+                return
+                
+            # Écriture industrielle du fichier Excel avec encodage universel anti-bug d'accents
+            with open(nom_fichier_csv, mode="w", newline="", encoding="utf-8-sig") as f:
+                ecrivain = csv.writer(f, delimiter=";") # Point-virgule pour l'alignement Excel automatique
+                
+                # Écriture de la ligne d'en-tête officielle du tableur
+                ecrivain.writerow([
+                    "N° FACTURE", "CLIENT", "ARTICLE / MODELE", "IMEI / SERIE / SAV", 
+                    "MONTANT HT (FCFA)", "VALEUR TVA (FCFA)", "TOTAL NET TTC (FCFA)", 
+                    "CAISSIERE EMETTEUR", "DATE FACTURATION", "HEURE", "SYNCHRONISÉ CLOUD"
+                ])
+                
+                # Injection de toutes les lignes comptables
+                for ligne in ventes_brutes:
+                    ecrivain.writerow(ligne)
+                    
+            messagebox.showinfo("Exportation Réussie", f"📊 RAPPORT COMPTABLE GÉNÉRÉ !\n\nLe fichier Excel a été créé avec succès sur votre bureau sous le nom :\n« KashKeeper_Rapport_Ventes_{horodatage}.csv »")
+        except Exception as e:
+            messagebox.showerror("Erreur d'écriture", f"Impossible d'exportateur le fichier Excel :\n{e}")
+
     def action_charger_statistiques():
         tempo = select_tempo.get()
         cible = entree_cible.get().strip()
@@ -402,6 +440,16 @@ def ouvrir_panneau_historique():
     tk.Button(cadre_filtre_nom, text="🎯 Filtrer", bg="#475569", fg="white", font=("Helvetica", 8, "bold"), command=action_filtrer_par_vendeuse).pack(side=tk.LEFT, padx=4)
     tk.Button(cadre_filtre_nom, text="📋 Afficher Tout", bg="#0284c7", fg="white", font=("Helvetica", 8, "bold"), command=action_afficher_tout_historique).pack(side=tk.RIGHT, padx=4)
 
+    # 🟢 INTEGRATION DU BOUTON PHYSIQUE EXCEL (A gauche de Afficher Tout pour un rendu Pro)
+    tk.Button(
+        cadre_filtre_nom, 
+        text="📥 EXPORTER SUR EXCEL", 
+        bg="#10b981", 
+        fg="white", 
+        font=("Helvetica", 8, "bold"), 
+        command=action_exporter_registre_excel
+    ).pack(side=tk.RIGHT, padx=8)
+
     grille_audit = ttk.Treeview(cadre_grille, columns=("ID", "Client", "Article", "Total TTC", "Date/Heure", "Émetteur"), show="headings", height=8)
     grille_audit.heading("ID", text="N°"); grille_audit.heading("Client", text="CLIENT"); grille_audit.heading("Article", text="ARTICLE"); grille_audit.heading("Total TTC", text="NET TTC"); grille_audit.heading("Date/Heure", text="TEMPOREL"); grille_audit.heading("Émetteur", text="CAISSIÈRE")
     
@@ -409,6 +457,7 @@ def ouvrir_panneau_historique():
     grille_audit.pack(fill=tk.BOTH, expand=True, pady=5)
 
     action_afficher_tout_historique()
+
 # =====================================================================
 # MODULE 4 : app_visuel.py (Version Multi-Postes Pro - PARTIE 6 SUR 7)
 # =====================================================================
@@ -933,62 +982,136 @@ def action_telecharger_mise_a_jour():
 
 
 def ouvrir_fenetre_paiement():
-    """Fenêtre d'activation de ticket autonome 30 jours (Style carte de recharge)."""
-    def action_valider_ticket_recharge():
-        code_saisi = entree_ticket.get().strip().upper()
-        if not code_saisi:
-            messagebox.showwarning("Champ vide", "Veuillez saisir votre code de ticket.")
+    """Fenêtre de déclenchement automatique du prélèvement Mobile Money connecté à Render."""
+    def action_declencher_prelevement():
+        num_momo = entree_numero_momo.get().strip()
+        
+        # 🟢 CONSTRUCTEUR : En mode Démo Campay, on autorise les numéros de test plus courts
+        if not num_momo or len(num_momo) < 7:
+            messagebox.showwarning("Numéro invalide", "Veuillez entrer un numéro de téléphone de test valide.")
             return
 
+        # Changement visuel immédiat pour informer le gérant
+        btn_payer.config(text="🔄 APPEL RÉSEAU EN COURS...", state=tk.DISABLED, bg="#475569")
+        fenetre_paye.update_idletasks()
+
         try:
-            # Envoi du ticket vers Render pour validation automatique
+            # 🟢 INTERCONNEXION DIRECTE : Appel vers ton serveur Cloud Render
             reponse = requests.post(
-                f"{URL_API_KASHFLOW}/licence/recharger",
-                json={"code_ticket": code_saisi},
+                f"{URL_API_KASHFLOW}/licence/collecter-momo",
+                json={"numero": num_momo},
                 headers={"X-API-Key": CLE_API_KASHFLOW},
-                timeout=6
+                timeout=12
             )
             
             if reponse.status_code == 200:
                 donnees = reponse.json()
-                messagebox.showinfo("Succès Absolu", f"🎉 {donnees.get('message')}\n\nNouvelle échéance : {donnees.get('nouvelle_echeance')}\nVotre comptoir est rechargé avec succès pour 30 jours !")
+                messagebox.showinfo(
+                    "Simulation USSD", 
+                    f"📱 PROTOCOLE USSD ACTIVÉ !\n\n{donnees.get('message')}\n\n"
+                    "En mode DÉMO, utilisez un numéro de test valide.\n"
+                    "Dès la validation, le serveur mettra à jour votre licence de 30 jours."
+                )
                 fenetre_paye.destroy()
             else:
-                messagebox.showerror("Échec", "Code de ticket invalide, expiré ou déjà utilisé.")
+                try:
+                    erreur_msg = reponse.json().get("detail", "Refus de la passerelle.")
+                except Exception:
+                    erreur_msg = "Erreur de communication avec Render."
+                messagebox.showerror("Échec du prélèvement", f"🔴 {erreur_msg}")
+                btn_payer.config(text="📲 DEMANDER LE RETRAIT USSD", state=tk.NORMAL, bg="#10b981")
+                
         except Exception as e:
-            messagebox.showerror("Erreur Réseau", f"Impossible de joindre le Cloud pour valider le ticket :\n{e}")
+            messagebox.showerror("Erreur Système", f"Impossible de joindre ton serveur Cloud Render :\n{e}")
+            btn_payer.config(text="📲 DEMANDER LE RETRAIT USSD", state=tk.NORMAL, bg="#10b981")
 
+    # Dimensions ajustées pour le confort visuel Pro
     fenetre_paye = Toplevel(FENETRE_PRINCIPALE_LOGIN)
-    fenetre_paye.title("💳 Activation de l'Abonnement")
-    fenetre_paye.geometry("380x360")
+    fenetre_paye.title("💳 Renouvellement Mobile Money")
+    fenetre_paye.geometry("440x380")
     fenetre_paye.configure(bg="#1e293b")
     fenetre_paye.resizable(False, False)
     fenetre_paye.grab_set()
 
-    tk.Label(fenetre_paye, text="RÉGULARISATION DE L'ABONNEMENT", font=("Helvetica", 11, "bold"), bg="#1e293b", fg="#f59e0b").pack(pady=12)
+    tk.Label(
+        fenetre_paye, 
+        text="RENOUVELLEMENT DE L'ABONNEMENT", 
+        font=("Segoe UI", 11, "bold"), 
+        bg="#1e293b", 
+        fg="#f59e0b"
+    ).pack(pady=(18, 10))
     
-    texte_instructions = (
-        "Pour réactiver votre comptoir KashKeeper (30 jours),\n"
-        "veuillez effectuer votre dépôt vers :\n\n"
-        "📱 Orange Money : 6 86 08 15 12 (serges desire) \n"
-        "📱 MTN MoMo : 83 10 63 38 (prince junior)\n"
-        "💳 Montant : 23 $ ( 14000 FCFA)\n\n"
-        "Une fois le dépôt fait, vous recevrez instantanément votre\n"
-        "code de ticket par WhatsApp."
-    )
-    tk.Label(fenetre_paye, text=texte_instructions, font=("Helvetica", 9), bg="#1e293b", fg="#cbd5e1", justify=tk.LEFT).pack(padx=20, pady=5)
-    
-    # Zone de saisie du ticket autonome
-    cadre_code = tk.Frame(fenetre_paye, bg="#1e293b")
-    cadre_code.pack(fill=tk.X, padx=25, pady=10)
-    
-    tk.Label(cadre_code, text="Saisir le Code de Ticket reçu :", font=("Helvetica", 9, "bold"), bg="#1e293b", fg="white").pack(anchor=tk.W)
-    entree_ticket = tk.Entry(cadre_code, font=("Helvetica", 11), bd=2, justify=tk.CENTER)
-    entree_ticket.pack(fill=tk.X, pady=4)
-    entree_ticket.insert(0, "KP-2026-")
+    cadre_texte = tk.Frame(fenetre_paye, bg="#1e293b", padx=20)
+    cadre_texte.pack(fill=tk.X)
 
-    tk.Button(fenetre_paye, text="🎟️ RECHARGER MON COMPTOIR", bg="#10b981", fg="white", font=("Helvetica", 10, "bold"), command=action_valider_ticket_recharge, pady=6).pack(fill=tk.X, padx=25, pady=5)
-    tk.Button(fenetre_paye, text="❌ FERMER", bg="#475569", fg="white", font=("Helvetica", 8, "bold"), command=fenetre_paye.destroy).pack(pady=5)
+    texte_instructions = (
+        "Entrez le numéro Mobile Money de test fourni par Campay.\n"
+        "Votre serveur Render va ordonner une simulation de prélèvement.\n\n"
+        "Dès que la passerelle valide le statut, votre licence est\n"
+        "automatiquement prolongée de 30 jours sur le Cloud."
+    )
+    
+    tk.Label(
+        cadre_texte, 
+        text=texte_instructions, 
+        font=("Segoe UI", 10), 
+        bg="#1e293b", 
+        fg="#cbd5e1", 
+        justify=tk.LEFT,
+        wraplength=390
+    ).pack(anchor=tk.W)
+    
+    cadre_input = tk.Frame(fenetre_paye, bg="#1e293b", padx=20)
+    cadre_input.pack(fill=tk.X, pady=(15, 10))
+    
+    tk.Label(
+        cadre_input, 
+        text="Numéro de Test Campay :", 
+        font=("Segoe UI", 9, "bold"), 
+        bg="#1e293b", 
+        fg="#94a3b8"
+    ).pack(anchor=tk.W, pady=(0, 4))
+    
+    entree_numero_momo = tk.Entry(
+        cadre_input, 
+        font=("Segoe UI", 13, "bold"), 
+        bd=0, 
+        bg="white", 
+        fg="#1e293b",
+        justify=tk.CENTER,
+        relief=tk.FLAT
+    )
+    entree_numero_momo.pack(fill=tk.X, ipady=6)
+    entree_numero_momo.insert(0, "4677")  # Pré-remplissage standard des numéros de test
+    entree_numero_momo.focus()
+
+    btn_payer = tk.Button(
+        fenetre_paye, 
+        text="📲  DEMANDER LE RETRAIT USSD", 
+        bg="#10b981", 
+        fg="white", 
+        font=("Segoe UI", 10, "bold"), 
+        activebackground="#059669",
+        activeforeground="white",
+        bd=0,
+        cursor="hand2",
+        command=action_declencher_prelevement, 
+        pady=8
+    )
+    btn_payer.pack(fill=tk.X, padx=20, pady=(10, 5))
+    
+    tk.Button(
+        fenetre_paye, 
+        text="ANNULER", 
+        bg="#1e293b", 
+        fg="#94a3b8", 
+        font=("Segoe UI", 9, "bold", "underline"), 
+        activebackground="#1e293b",
+        activeforeground="white",
+        bd=0, 
+        cursor="hand2",
+        command=fenetre_paye.destroy
+    ).pack(pady=5)
 
 
 # --- POINT DE DÉMARRAGE DE LA RACINE UNIQUE ---
@@ -996,7 +1119,7 @@ login = tk.Tk()
 FENETRE_PRINCIPALE_LOGIN = login
 
 login.title("Sécurité d'Accès")
-login.geometry("350x460") # Augmenté de 420 à 460 pour offrir une marge d'espace au nouveau bouton
+login.geometry("350x460") 
 login.configure(bg="#1e293b")
 
 tk.Label(login, text="CONNEXION SÉCURISÉE", font=("Helvetica", 12, "bold"), bg="#1e293b", fg="white").pack(pady=20)
@@ -1046,4 +1169,3 @@ btn_abonnement = tk.Button(
 btn_abonnement.pack(side=tk.RIGHT)
 
 login.mainloop()
-
