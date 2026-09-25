@@ -312,3 +312,34 @@ def api_declencher_collecte_momo(payload: dict, x_api_key: str = Header(...)):
         }
     else:
         raise HTTPException(status_code=400, detail="Numéro de test invalide. Utilisez 237677777777 pour le succès.")
+
+
+# =====================================================================
+# SIMULATEUR CHRONO DE BLOCAGE - EXTENSION DU SYSTÈME SAAS DE SERGE
+# =====================================================================
+from datetime import datetime
+
+# Variable temporaire en mémoire pour stocker l'heure du premier allumage
+HORODATAGE_PREMIER_LANCEMENT = {}
+
+@app.get("/licence/statut")
+def api_verifier_licence_magasin(x_api_key: str = Header(...)):
+    """🛡️ MODULE CHRONO : Verrouille l'accès au comptoir 5 minutes après l'allumage."""
+    cle_propre = x_api_key.strip()
+    
+    # Si la boutique se connecte pour la toute première fois
+    if cle_propre not in HORODATAGE_PREMIER_LANCEMENT:
+        # On capture l'heure exacte de cette première seconde
+        HORODATAGE_PREMIER_LANCEMENT[cle_propre] = datetime.now()
+        return {"statut": "actif", "jours_restants": 1, "message": "Chronomètre de 5 minutes activé !"}
+        
+    # On calcule combien de temps s'est écoulé depuis l'allumage initial
+    heure_initiale = HORODATAGE_PREMIER_LANCEMENT[cle_propre]
+    temps_ecoule = datetime.now() - heure_initiale
+    
+    # 🛑 SÉCURITÉ CHRONO : Si le délai dépasse 5 minutes (300 secondes), on bloque !
+    if temps_ecoule.total_seconds() > 300:
+        return {"statut": "expire", "jours_restants": 0, "message": "Délai de test expiré."}
+    else:
+        # L'application est encore dans sa période de validité
+        return {"statut": "actif", "jours_restants": 1}
