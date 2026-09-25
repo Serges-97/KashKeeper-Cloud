@@ -821,7 +821,7 @@ def ouvrir_historique_caissiere():
 # =====================================================================
 
 def verifier_acces():
-    """Valide la session employé et applique le contrôle de licence Cloud sans faille de triche."""
+    """Valide la session employé et applique le contrôle de licence Cloud bloquant et inviolable."""
     global SESSION_UTILISATEUR, NOM_CAISSIERE_ACTIVE
     user = entree_user.get().strip().lower()
     pwd = entree_password.get().strip()
@@ -844,7 +844,7 @@ def verifier_acces():
         ligne_boutique = curseur.fetchone()
         connexion.close()
 
-        mot_de_passe_actuel_db = ligne_pwd[0] if ligne_pwd else "serge2026"
+        mot_de_passe_actuel_db = ligne_pwd if ligne_pwd else "serge2026"
         boutique_installee = ligne_boutique is not None
 
         # 🟢 ASSISTANT 1ER DEMARRAGE (Code d'usine serge2026 exigé)
@@ -878,7 +878,6 @@ def verifier_acces():
         # 🟢 CONTRÔLE INTERCONNEXION SAAS (Vérification de la licence sur Render)
         if data_base.verifier_identifiants_sql(user, pwd):
             try:
-                # Appel sécurisé à la route que nous venons d'écrire sur Render
                 reponse_licence = requests.get(
                     f"{URL_API_KASHFLOW}/licence/statut", 
                     headers={"X-API-Key": CLE_API_KASHFLOW}, 
@@ -890,21 +889,20 @@ def verifier_acces():
                     statut_serveur = infos.get("statut", "actif")
                     jours_restants = infos.get("jours_restants", 0)
 
-                    # Cas A : Blocage strict (Tolérance dépassée)
+                    # 🛑 CAS 1 : BLOCAGE DE SÉCURITÉ STRICT
                     if statut_serveur == "expire":
-                        messagebox.showerror("Abonnement Expiré", "🚨 COMPTOIR VERROUILLÉ !\n\nVotre période d'abonnement et de tolérance est arrivée à terme. Veuillez régulariser en cliquant sur 'PAYER ABONNEMENT' en bas à droite.")
-                        return
+                        messagebox.showerror("Abonnement Expiré", "🚨 COMPTOIR VERROUILLÉ !\n\nVotre période d'abonnement et de tolérance est terminée.\nVeuillez régulariser en cliquant sur 'PAYER ABONNEMENT' en bas à droite.")
+                        return # On arrête TOUT ici, le code ne descend pas !
                     
-                    # Cas B : Gestion des imprévus (Période de grâce de 3 jours)
+                    # 🔶 CAS 2 : PÉRIODE DE GRÂCE (Tolérance de 3 jours)
                     elif statut_serveur == "grace":
-                        messagebox.showwarning("Avertissement de Tolérance", f"⚠️ ALERTE FINANCIÈRE :\n\nVotre abonnement est expiré. Mode tolérance activé pour {jours_restants} jour(s).\n\nVeuillez recharger pour éviter la coupure du comptoir.")
+                        messagebox.showwarning("Avertissement de Tolérance", f"⚠️ ALERTE FINANCIÈRE :\n\nVotre abonnement est expiré. Mode tolérance activé pour {jours_restants} jour(s).\nVeuillez recharger pour éviter la coupure automatique.")
 
             except Exception as e:
-                # En cas de coupure de courant/Internet, on autorise l'accès local pour ne pas bloquer le commerce.
-                # Dès que la box Internet redémarrera, le filtre Cloud s'appliquera automatiquement.
+                # Tolérance hors-ligne si panne de réseau internet temporaire
                 logging.warning("Vérification licence différée (mode hors-ligne) : %s", e)
 
-            # Si la licence est OK ou tolérée temporairement hors-ligne, on ouvre le comptoir
+            # 🟢 SEULEMENT SI TOUT EST OK : On autorise enfin l'accès au comptoir
             SESSION_UTILISATEUR = str(user).strip().lower()
             NOM_CAISSIERE_ACTIVE = str(user).strip().lower()
             messagebox.showinfo("Accès Autorisé", f"Bienvenue {SESSION_UTILISATEUR.upper()} !")
@@ -915,6 +913,7 @@ def verifier_acces():
             
     except Exception as e:
         messagebox.showerror("Erreur", f"Erreur système : {str(e)}")
+
 
 
 def recuperer_mot_de_passe_oublie():
