@@ -986,7 +986,6 @@ def ouvrir_fenetre_paiement():
     def action_declencher_prelevement():
         num_momo = entree_numero_momo.get().strip()
         
-        # 🟢 CONSTRUCTEUR : En mode Démo Campay, on autorise les numéros de test plus courts
         if not num_momo or len(num_momo) < 7:
             messagebox.showwarning("Numéro invalide", "Veuillez entrer un numéro de téléphone de test valide.")
             return
@@ -996,7 +995,7 @@ def ouvrir_fenetre_paiement():
         fenetre_paye.update_idletasks()
 
         try:
-            # 🟢 INTERCONNEXION DIRECTE : Appel vers ton serveur Cloud Render
+            # INTERCONNEXION DIRECTE : Appel vers ton serveur Cloud Render
             reponse = requests.post(
                 f"{URL_API_KASHFLOW}/licence/collecter-momo",
                 json={"numero": num_momo},
@@ -1009,21 +1008,27 @@ def ouvrir_fenetre_paiement():
                 messagebox.showinfo(
                     "Simulation USSD", 
                     f"📱 PROTOCOLE USSD ACTIVÉ !\n\n{donnees.get('message')}\n\n"
-                    "En mode DÉMO, utilisez un numéro de test valide.\n"
+                    "En mode DÉMO, utilisez un numéro de test valide depuis l'écran CamPay.\n"
                     "Dès la validation, le serveur mettra à jour votre licence de 30 jours."
                 )
-                fenetre_paye.destroy()
+                if fenetre_paye.winfo_exists():
+                    fenetre_paye.destroy()
             else:
                 try:
                     erreur_msg = reponse.json().get("detail", "Refus de la passerelle.")
                 except Exception:
-                    erreur_msg = "Erreur de communication avec Render."
+                    erreur_msg = f"Code Erreur {reponse.status_code} renvoyé par le serveur."
+                
                 messagebox.showerror("Échec du prélèvement", f"🔴 {erreur_msg}")
-                btn_payer.config(text="📲 DEMANDER LE RETRAIT USSD", state=tk.NORMAL, bg="#10b981")
+                
+                # 🟢 SÉCURITÉ TKINTER : On vérifie si la fenêtre existe toujours avant de réactiver le bouton
+                if fenetre_paye.winfo_exists():
+                    btn_payer.config(text="📲 DEMANDER LE RETRAIT USSD", state=tk.NORMAL, bg="#10b981")
                 
         except Exception as e:
             messagebox.showerror("Erreur Système", f"Impossible de joindre ton serveur Cloud Render :\n{e}")
-            btn_payer.config(text="📲 DEMANDER LE RETRAIT USSD", state=tk.NORMAL, bg="#10b981")
+            if fenetre_paye.winfo_exists():
+                btn_payer.config(text="📲 DEMANDER LE RETRAIT USSD", state=tk.NORMAL, bg="#10b981")
 
     # Dimensions ajustées pour le confort visuel Pro
     fenetre_paye = Toplevel(FENETRE_PRINCIPALE_LOGIN)
@@ -1045,8 +1050,8 @@ def ouvrir_fenetre_paiement():
     cadre_texte.pack(fill=tk.X)
 
     texte_instructions = (
-        "Entrez le numéro Mobile Money de test fourni par Campay.\n"
-        "Votre serveur Render va ordonner une simulation de prélèvement.\n\n"
+        "Entrez votre numéro MTN MoMo ou Orange Money de test.\n"
+        "Votre serveur Render va ordonner une simulation de prélèvement (1 FCFA).\n\n"
         "Dès que la passerelle valide le statut, votre licence est\n"
         "automatiquement prolongée de 30 jours sur le Cloud."
     )
@@ -1066,7 +1071,7 @@ def ouvrir_fenetre_paiement():
     
     tk.Label(
         cadre_input, 
-        text="Numéro de Test Campay :", 
+        text="Numéro de Test CamPay (Cameroun) :", 
         font=("Segoe UI", 9, "bold"), 
         bg="#1e293b", 
         fg="#94a3b8"
@@ -1082,7 +1087,7 @@ def ouvrir_fenetre_paiement():
         relief=tk.FLAT
     )
     entree_numero_momo.pack(fill=tk.X, ipady=6)
-    entree_numero_momo.insert(0, "4677")  # Pré-remplissage standard des numéros de test
+    entree_numero_momo.insert(0, "237677777777")  
     entree_numero_momo.focus()
 
     btn_payer = tk.Button(
@@ -1112,6 +1117,7 @@ def ouvrir_fenetre_paiement():
         cursor="hand2",
         command=fenetre_paye.destroy
     ).pack(pady=5)
+
 
 
 # --- POINT DE DÉMARRAGE DE LA RACINE UNIQUE ---
