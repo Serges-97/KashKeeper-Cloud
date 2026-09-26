@@ -13,7 +13,8 @@ import requests
 import data_base
 import operation
 import json 
-
+import win32print
+import win32ui
 # Lancement des configurations SQLite d'usine au démarrage du logiciel
 data_base.initialisation_systeme()
 
@@ -25,6 +26,49 @@ CLE_MASTER_SERGE = "Je suis simple"
 
 URL_API_KASHFLOW = "https://onrender.com" 
 CLE_API_KASHFLOW = "KASHFLOW_KEY_DEFAUT"
+
+def imprimer_ticket_thermique_direct(client, article, total_ttc, caissiere):
+    """Envoie un ticket de caisse épuré directement sur le rouleau de l'imprimante thermique."""
+    try:
+        nom_boutique = data_base.recuperer_nom_boutique_sql() or "KASHKEEPER BOUTIQUE"
+        nom_boutique = str(nom_boutique).upper()
+        nom_imprimante = win32print.GetDefaultPrinter()
+        liste_imprimantes = [imp[2] for imp in win32print.EnumPrinters(win32print.PRINTER_ENUM_LOCAL)]
+        
+        for imp in liste_imprimantes:
+            if any(mot in imp.lower() for mot in ["thermal", "pos", "58", "80", "xp-"]):
+                nom_imprimante = imp
+                break
+
+        date_heure = datetime.now().strftime("%d/%m/%Y  %H:%M")
+        separateur = "--------------------------------"
+        
+        ticket_texte = (
+            f"{nom_boutique}\n"
+            f"{separateur}\n"
+            f"Date : {date_heure}\n"
+            f"Caissiere : {str(caissiere).upper()}\n"
+            f"Client : {str(client).upper()}\n"
+            f"{separateur}\n"
+            f"ARTICLE : {str(article).upper()}\n"
+            f"{separateur}\n"
+            f"TOTAL NET : {total_ttc} FCFA\n"
+            f"{separateur}\n"
+            f"Merci pour votre confiance !\n"
+            f"A bientot.\n\n\n\n\n"
+        )
+
+        hPrinter = win32print.OpenPrinter(nom_imprimante)
+        try:
+            hJob = win32print.StartDocPrinter(hPrinter, 1, ("KashKeeper_Ticket", None, "TEXT"))
+            win32print.StartPagePrinter(hPrinter)
+            win32print.WritePrinter(hPrinter, ticket_texte.encode("utf-8"))
+            win32print.EndPagePrinter(hPrinter)
+            win32print.EndDocPrinter(hPrinter)
+        finally:
+            win32print.ClosePrinter(hPrinter)
+    except Exception as e:
+        logging.warning("Impression thermique ignoree ou non configuree : %s", e)
 
 def charger_configuration_externe():
     """Lit dynamiquement la configuration du client en supportant les espaces, tirets et égaux."""
@@ -674,9 +718,12 @@ def ouvrir_comptoir_facturation():
                     nom_boutique, num_facture, nom_client, smartphone, desc, qte,
                     calcul["montant_ht"], calcul["valeur_tva"], calcul["total_ttc"], caissiere_nom
                 )
+                                # 🟢 DÉCLENCHEMENT DU ROULEAU THERMIQUE AUTOMATIQUE
+                imprimer_ticket_thermique_direct(nom_client, smartphone, calcul["total_ttc"], caissiere_nom)
+
 
                 if verif_stock["alerte_patron"]:
-                    messagebox.showwarning("Alerte Stock", f"⚠️ Stock critique ! Reste: {verif_stock['restant']} pcs")
+                    messagebox.showwarning("Alerte Stock", f"⚠️ {verif_stock['restant']} pcs")
                     
                 messagebox.showinfo("Succès", f"✅ Vente #{num_facture} émise avec succès !")
                 
@@ -844,11 +891,12 @@ def verifier_acces():
         ligne_boutique = curseur.fetchone()
         connexion.close()
 
-        mot_de_passe_actuel_db = ligne_pwd if ligne_pwd else "serge2026"
+        mot_de_passe_actuel_db = ligne_pwd[0] if ligne_pwd else "serge2026"
         boutique_installee = ligne_boutique is not None
 
-        # 🟢 ASSISTANT 1ER DEMARRAGE (Code d'usine serge2026 exigé)
-        if not boutique_installee and mot_de_passe_actuel_db == "serge2026":
+        # 🟢 CORRECTION CONSTRUCTEUR : Si le nom de la boutique n'est pas dans la base locale, 
+        # on force l'ouverture de l'assistant, même si le Cloud est actif !
+        if not boutique_installee:
             if user == "gerant" and pwd == "serge2026":
                 nom_magasin = simpledialog.askstring("Configuration Boutique - Étape 1/2", "Bienvenue chez KashKeeper !\n\nVeuillez entrer le NOM OFFICIEL de votre entreprise :")
                 if not nom_magasin or not nom_magasin.strip():
@@ -868,10 +916,13 @@ def verifier_acces():
                 entree_password.focus()
                 return
             else:
-                messagebox.showerror("Accès Refusé", "Code d'initialisation d'usine incorrect.")
-                return
+                # 🛑 SÉCURITÉ : Si la base locale vient d'être supprimée, on explique au gérant d'utiliser le code d'usine pour réinitialiser
+                if pwd != "serge2026":
+                    messagebox.showerror("Nouvelle Installation", "Base de données locale introuvable.\n\nConnectez-vous avec  le mot de passe d'usine pour reconfigurer votre espace.")
+                    return
 
-        if pwd == "serge2026" and mot_de_passe_actuel_db != "serge2026":
+        # 🛑 PROTECTION : Ce bloc ne s'active désormais QUE si la boutique est déjà configurée localement
+        if boutique_installee and pwd == "serge2026" and mot_de_passe_actuel_db != "serge2026":
             messagebox.showerror("Accès Refusé", "Ce mot de passe d'usine a expiré après la configuration initiale.")
             return
 
@@ -981,20 +1032,21 @@ def action_telecharger_mise_a_jour():
 
 
 def ouvrir_fenetre_paiement():
-    """Fenêtre de déclenchement automatique du prélèvement Mobile Money connecté à Render."""
+    """Fenêtre de renouvellement de l'abonnement par Mobile Money ou Carte Bancaire Internationale."""
     def action_declencher_prelevement():
         num_momo = entree_numero_momo.get().strip()
         
-        if not num_momo or len(num_momo) < 7:
-            messagebox.showwarning("Numéro invalide", "Veuillez entrer un numéro de téléphone de test valide.")
-            return
+        if mode_paiement.get() == "MOMO":
+            if not num_momo or len(num_momo) < 9:
+                messagebox.showwarning("Numéro invalide", "Veuillez entrer un numéro de téléphone valide à 9 chiffres.")
+                return
+        else:
+            num_momo = "CARTE_BANCAIRE"
 
-        # Changement visuel immédiat pour informer le gérant
         btn_payer.config(text="🔄 APPEL RÉSEAU EN COURS...", state=tk.DISABLED, bg="#475569")
         fenetre_paye.update_idletasks()
 
         try:
-            # INTERCONNEXION DIRECTE : Appel vers ton serveur Cloud Render
             reponse = requests.post(
                 f"{URL_API_KASHFLOW}/licence/collecter-momo",
                 json={"numero": num_momo},
@@ -1004,118 +1056,70 @@ def ouvrir_fenetre_paiement():
             
             if reponse.status_code == 200:
                 donnees = reponse.json()
-                messagebox.showinfo(
-                    "Simulation USSD", 
-                    f"📱 PROTOCOLE USSD ACTIVÉ !\n\n{donnees.get('message')}\n\n"
-                    "En mode DÉMO, utilisez un numéro de test valide depuis l'écran CamPay.\n"
-                    "Dès la validation, le serveur mettra à jour votre licence de 30 jours."
-                )
-                if fenetre_paye.winfo_exists():
-                    fenetre_paye.destroy()
+                if num_momo == "CARTE_BANCAIRE":
+                    messagebox.showinfo(
+                        "Paiement par Carte", 
+                        "💳 INTERCONNEXION BANCAIRE VISA/MC REUSSIE !\n\nUn lien de facturation international a été raccordé à votre boutique.\n"
+                        "Consultez vos reçus pour finaliser le paiement."
+                    )
+                else:
+                    messagebox.showinfo("Paiement Initié", f"📱 {donnees.get('message')}")
+                fenetre_paye.destroy()
             else:
-                try:
-                    erreur_msg = reponse.json().get("detail", "Refus de la passerelle.")
-                except Exception:
-                    erreur_msg = f"Code Erreur {reponse.status_code} renvoyé par le serveur."
-                
-                messagebox.showerror("Échec du prélèvement", f"🔴 {erreur_msg}")
-                
-                # 🟢 SÉCURITÉ TKINTER : On vérifie si la fenêtre existe toujours avant de réactiver le bouton
-                if fenetre_paye.winfo_exists():
-                    btn_payer.config(text="📲 DEMANDER LE RETRAIT USSD", state=tk.NORMAL, bg="#10b981")
-                
+                try: erreur_msg = reponse.json().get("detail", "Refus de la passerelle.")
+                except Exception: erreur_msg = "Erreur de communication avec le serveur."
+                messagebox.showerror("Échec", f"🔴 {erreur_msg}")
+                btn_payer.config(text="📲 DEMANDER LE RETRAIT", state=tk.NORMAL, bg="#10b981")
         except Exception as e:
-            messagebox.showerror("Erreur Système", f"Impossible de joindre ton serveur Cloud Render :\n{e}")
-            if fenetre_paye.winfo_exists():
-                btn_payer.config(text="📲 DEMANDER LE RETRAIT USSD", state=tk.NORMAL, bg="#10b981")
+            messagebox.showerror("Erreur Système", f"Impossible de joindre le serveur Cloud Render :\n{e}")
+            btn_payer.config(text="📲 DEMANDER LE RETRAIT", state=tk.NORMAL, bg="#10b981")
 
-    # Dimensions ajustées pour le confort visuel Pro
+    def toggle_champs_paiement():
+        if mode_paiement.get() == "MOMO":
+            cadre_input.pack(fill=tk.X, pady=(10, 10), before=btn_payer)
+        else:
+            cadre_input.pack_forget()
+
     fenetre_paye = Toplevel(FENETRE_PRINCIPALE_LOGIN)
-    fenetre_paye.title("💳 Renouvellement Mobile Money")
-    fenetre_paye.geometry("440x380")
+    fenetre_paye.title("💳 Renouvellement de l'Abonnement")
+    fenetre_paye.geometry("440x420")
     fenetre_paye.configure(bg="#1e293b")
     fenetre_paye.resizable(False, False)
     fenetre_paye.grab_set()
 
-    tk.Label(
-        fenetre_paye, 
-        text="RENOUVELLEMENT DE L'ABONNEMENT", 
-        font=("Segoe UI", 11, "bold"), 
-        bg="#1e293b", 
-        fg="#f59e0b"
-    ).pack(pady=(18, 10))
+    tk.Label(fenetre_paye, text="RENOUVELLEMENT DE L'ABONNEMENT", font=("Segoe UI", 11, "bold"), bg="#1e293b", fg="#f59e0b").pack(pady=(18, 5))
     
+    cadre_choix = tk.Frame(fenetre_paye, bg="#1e293b")
+    cadre_choix.pack(pady=10)
+    mode_paiement = tk.StringVar(value="MOMO")
+    
+    tk.Radiobutton(cadre_choix, text="📱 Mobile Money", variable=mode_paiement, value="MOMO", bg="#1e293b", fg="white", selectcolor="#1e293b", font=("Segoe UI", 9, "bold"), command=toggle_champs_paiement).pack(side=tk.LEFT, padx=15)
+    tk.Radiobutton(cadre_choix, text="💳 Carte Bancaire (Visa/Mc)", variable=mode_paiement, value="CARD", bg="#1e293b", fg="white", selectcolor="#1e293b", font=("Segoe UI", 9, "bold"), command=toggle_champs_paiement).pack(side=tk.LEFT, padx=15)
+
     cadre_texte = tk.Frame(fenetre_paye, bg="#1e293b", padx=20)
     cadre_texte.pack(fill=tk.X)
 
     texte_instructions = (
-        "Entrez votre numéro MTN MoMo ou Orange Money de test.\n"
-        "Votre serveur Render va ordonner une simulation de prélèvement (1 FCFA).\n\n"
-        "Dès que la passerelle valide le statut, votre licence est\n"
-        "automatiquement prolongée de 30 jours sur le Cloud."
+        "Sélectionnez votre mode de règlement préféré.\n"
+        "Pour le Mobile Money, un pop-up USSD surgira sur votre écran.\n"
+        "Pour la Carte Bancaire, une facturation sécurisée Visa/Mastercard sera initiée.\n\n"
+        "Tarif mensuel : 14 000 FCFA"
     )
-    
-    tk.Label(
-        cadre_texte, 
-        text=texte_instructions, 
-        font=("Segoe UI", 10), 
-        bg="#1e293b", 
-        fg="#cbd5e1", 
-        justify=tk.LEFT,
-        wraplength=390
-    ).pack(anchor=tk.W)
+    tk.Label(cadre_texte, text=texte_instructions, font=("Segoe UI", 10), bg="#1e293b", fg="#cbd5e1", justify=tk.LEFT, wraplength=390).pack(anchor=tk.W, pady=5)
     
     cadre_input = tk.Frame(fenetre_paye, bg="#1e293b", padx=20)
-    cadre_input.pack(fill=tk.X, pady=(15, 10))
+    cadre_input.pack(fill=tk.X, pady=(10, 10))
+    tk.Label(cadre_input, text="Numéro Mobile Money (Cameroun) :", font=("Segoe UI", 9, "bold"), bg="#1e293b", fg="#94a3b8").pack(anchor=tk.W, pady=(0, 4))
     
-    tk.Label(
-        cadre_input, 
-        text="Numéro de Test CamPay (Cameroun) :", 
-        font=("Segoe UI", 9, "bold"), 
-        bg="#1e293b", 
-        fg="#94a3b8"
-    ).pack(anchor=tk.W, pady=(0, 4))
-    
-    entree_numero_momo = tk.Entry(
-        cadre_input, 
-        font=("Segoe UI", 13, "bold"), 
-        bd=0, 
-        bg="white", 
-        fg="#1e293b",
-        justify=tk.CENTER,
-        relief=tk.FLAT
-    )
+    entree_numero_momo = tk.Entry(cadre_input, font=("Segoe UI", 13, "bold"), bd=0, bg="white", fg="#1e293b", justify=tk.CENTER, relief=tk.FLAT)
     entree_numero_momo.pack(fill=tk.X, ipady=6)
-    entree_numero_momo.insert(0, "237677777777")  
-    entree_numero_momo.focus()
+    entree_numero_momo.insert(0, "6")
 
-    btn_payer = tk.Button(
-        fenetre_paye, 
-        text="📲  DEMANDER LE RETRAIT USSD", 
-        bg="#10b981", 
-        fg="white", 
-        font=("Segoe UI", 10, "bold"), 
-        activebackground="#059669",
-        activeforeground="white",
-        bd=0,
-        cursor="hand2",
-        command=action_declencher_prelevement, 
-        pady=8
-    )
-    btn_payer.pack(fill=tk.X, padx=20, pady=(10, 5))
+    btn_payer = tk.Button(fenetre_paye, text="🚀  DEMANDER LE RETRAIT SÉCURISÉ", bg="#10b981", fg="white", font=("Segoe UI", 10, "bold"), bd=0, cursor="hand2", command=action_declencher_prelevement, pady=8)
+    btn_payer.pack(fill=tk.X, padx=20, pady=(15, 5))
     
-    tk.Button(
-        fenetre_paye, 
-        text="ANNULER", 
-        bg="#1e293b", 
-        fg="#94a3b8", 
-        font=("Segoe UI", 9, "bold", "underline"), 
-        activebackground="#1e293b",
-        activeforeground="white",
-        bd=0, 
-        cursor="hand2",
-        command=fenetre_paye.destroy
-    ).pack(pady=5)
+    tk.Button(fenetre_paye, text="ANNULER", bg="#1e293b", fg="#94a3b8", font=("Segoe UI", 9, "bold", "underline"), bd=0, cursor="hand2", command=fenetre_paye.destroy).pack(pady=5)
+
 
 
 
