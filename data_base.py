@@ -95,6 +95,7 @@ def initialisation_systeme():
         modele TEXT UNIQUE NOT NULL,
         quantite_dispo INTEGER NOT NULL,
         ventes_cumulees INTEGER DEFAULT 0
+        prix_achat REAL DEFAULT 0,
     )
     """)
     
@@ -394,3 +395,56 @@ def obtenir_registre_ventes_brutes():
     lignes = curseur.fetchall()
     connexion.close()
     return lignes
+
+def forcer_mise_a_jour_stock_local_avec_prix(modele, quantite, prix_achat=0):
+    """Met à jour l'inventaire local en intégrant le prix d'achat secret."""
+    import sqlite3
+    connexion = sqlite3.connect(DB_NAME)
+    curseur = connexion.cursor()
+    curseur.execute("""
+        INSERT INTO stocks (modele, quantite_dispo, prix_achat) VALUES (?, ?, ?)
+        ON CONFLICT(modele) DO UPDATE SET quantite_dispo = ?, prix_achat = ?
+    """, (modele, quantite, prix_achat, quantite, prix_achat))
+    connexion.commit()
+    connexion.close()
+
+def obtenir_tous_les_stocks_locaux_complets():
+    """Renvoie l'inventaire complet avec le PRIX D'ACHAT (Réservé au gérant)."""
+    import sqlite3
+    connexion = sqlite3.connect(DB_NAME)
+    curseur = connexion.cursor()
+    curseur.execute("SELECT id, modele, quantite_dispo, prix_achat FROM stocks")
+    lignes = curseur.fetchall()
+    connexion.close()
+    return lignes
+
+def extraire_benefice_net_periode(temporalite, cible):
+    """Calcule le chiffre d'affaires et soustrait le prix d'achat pour obtenir le bénéfice net."""
+    import sqlite3
+    connexion = sqlite3.connect(DB_NAME)
+    curseur = connexion.cursor()
+    
+    # Extraction des ventes sur la période cible
+    curseur.execute("SELECT article, quantite, total_ttc, montant_ht FROM ventes")
+    toutes_les_ventes = curseur.fetchall()
+    
+    ca_total = 0.0
+    total_cout_achat = 0.0
+    
+    for article, qte, ttc, ht in toutes_les_ventes:
+        # On cherche le prix d'achat de cet article en stock
+        curseur.execute("SELECT prix_achat FROM stocks WHERE lower(modele) = ?", (str(article).lower().strip(),))
+        ligne_achat = curseur.fetchone()
+        p_achat = ligne_achat[0] if ligne_achat else 0.0
+        
+        ca_total += float(ttc)
+        total_cout_achat += (p_achat * int(qte))
+        
+    benefice_net = ca_total - total_cout_achat
+    connexion.close()
+    
+    return {
+        "ca_total": ca_total,
+        "benefice_net": benefice_net,
+        "frais_achat": total_cout_achat
+    }

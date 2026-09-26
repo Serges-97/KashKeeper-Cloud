@@ -15,6 +15,9 @@ import operation
 import json 
 import win32print
 import win32ui
+import webbrowser
+
+
 # Lancement des configurations SQLite d'usine au démarrage du logiciel
 data_base.initialisation_systeme()
 
@@ -28,12 +31,14 @@ URL_API_KASHFLOW = "https://onrender.com"
 CLE_API_KASHFLOW = "KASHFLOW_KEY_DEFAUT"
 
 def imprimer_ticket_thermique_direct(client, article, total_ttc, caissiere):
-    """Envoie un ticket de caisse épuré directement sur le rouleau de l'imprimante thermique."""
+    """Pilote physiquement les bobines de l'imprimante thermique détectée sur le port USB Windows."""
     try:
         nom_boutique = data_base.recuperer_nom_boutique_sql() or "KASHKEEPER BOUTIQUE"
         nom_boutique = str(nom_boutique).upper()
+        
+        # Sélection automatique de l'imprimante thermique par son nom de pilote
         nom_imprimante = win32print.GetDefaultPrinter()
-        liste_imprimantes = [imp[2] for imp in win32print.EnumPrinters(win32print.PRINTER_ENUM_LOCAL)]
+        liste_imprimantes = [imp[2] for imp in win32print.EnumPrinters(win32print.PRINTER_ENUM_LOCAL | win32print.PRINTER_ENUM_CONNECTIONS)]
         
         for imp in liste_imprimantes:
             if any(mot in imp.lower() for mot in ["thermal", "pos", "58", "80", "xp-"]):
@@ -55,7 +60,7 @@ def imprimer_ticket_thermique_direct(client, article, total_ttc, caissiere):
             f"TOTAL NET : {total_ttc} FCFA\n"
             f"{separateur}\n"
             f"Merci pour votre confiance !\n"
-            f"A bientot.\n\n\n\n\n"
+            f"A bientot.\n\n\n\n\n" # Sauts de ligne d'usine pour laisser sortir le papier du massicot
         )
 
         hPrinter = win32print.OpenPrinter(nom_imprimante)
@@ -68,7 +73,7 @@ def imprimer_ticket_thermique_direct(client, article, total_ttc, caissiere):
         finally:
             win32print.ClosePrinter(hPrinter)
     except Exception as e:
-        logging.warning("Impression thermique ignoree ou non configuree : %s", e)
+        logging.warning("Erreur physique impression thermique directe : %s", e)
 
 def charger_configuration_externe():
     """Lit dynamiquement la configuration du client en supportant les espaces, tirets et égaux."""
@@ -162,160 +167,90 @@ def synchroniser_file_cloud():
 # 📦 PANNEAU GESTION DE L'INVENTAIRE / STOCKS (EXCLUSIVITÉ GÉRANT)
 # =====================================================================
 def ouvrir_panneau_stock():
-    """Interface d'inventaire moderne avec barre de défilement et sécurité anti-doublons de casse."""
+    """Interface d'inventaire moderne réservée au gérant avec affichage secret du Prix d'Achat."""
     if SESSION_UTILISATEUR != "gerant":
         messagebox.showerror("Accès Interdit", "Seul le gérant peut modifier l'inventaire.")
         return
 
-    # Déclaration initiale des variables de saisie pour effacer UnboundLocalError
-    global entree_modele, entree_qte_stock
+    global entree_modele, entree_qte_stock, entree_prix_achat_stock
 
-    def pousser_stock_vers_cloud(modele, quantite):
-        """Propulse la modification d'inventaire sur le serveur en direct."""
-        if not URL_API_KASHFLOW or not CLE_API_KASHFLOW:
-            return
-        try:
-            payload = {"modele": str(modele).strip().lower(), "quantite_dispo": int(quantite)}
-            def requete():
-                try: requests.post(f"{URL_API_KASHFLOW}/stocks/mettre_a_jour", json=payload, headers={"X-API-Key": CLE_API_KASHFLOW}, timeout=6)
-                except Exception: pass
-            threading.Thread(target=requete, daemon=True).start()
-        except Exception: pass
-
-    def action_ajouter_quantite(id_stock_cible, nom_article_cible):
-        """Ajoute du stock de manière chirurgicale sur l'ID de la ligne sélectionnée."""
-        qte = simpledialog.askinteger("Réapprovisionnement", f"Quantité à ajouter pour « {str(nom_article_cible).upper()} » :", parent=admin_stock, minvalue=1)
-        if qte is None: return
-
-        connexion = sqlite3.connect(data_base.DB_NAME)
-        connexion.execute("UPDATE stocks SET quantite_dispo = quantite_dispo + ? WHERE id = ?", (qte, id_stock_cible))
-        qte_totale = connexion.execute("SELECT quantite_dispo FROM stocks WHERE id = ?", (id_stock_cible,)).fetchone()[0]
-        connexion.commit()
-        connexion.close()
-        
-        pousser_stock_vers_cloud(nom_article_cible.strip().lower(), qte_totale)
-        rafraichir_tableau()
-        messagebox.showinfo("Inventaire mis à jour", "Stock augmenté avec succès.")
+    def pushing_stock_cloud_complet(modele, quantite, prix_achat):
+        if not URL_API_KASHFLOW or not CLE_API_KASHFLOW: return
+        payload = {"modele": str(modele).strip().lower(), "quantite_dispo": int(quantite), "prix_achat": float(prix_achat)}
+        threading.Thread(target=lambda: requests.post(f"{URL_API_KASHFLOW}/stocks/mettre_a_jour", json=payload, headers={"X-API-Key": CLE_API_KASHFLOW}, timeout=6), daemon=True).start()
 
     def rafraichir_tableau():
-        """Recharge les stocks et remplit le tableau défilant."""
         for i in tableau_stocks.get_children():
             tableau_stocks.delete(i)
-        
-        lignes = data_base.obtenir_tous_les_stocks_locaux()
-        for id_db, modele, quantite, _ in lignes:
-            tableau_stocks.insert("", tk.END, iid=str(id_db), values=(str(modele).strip().upper(), f"{quantite} pcs"))
-# =====================================================================
-# MODULE 4 : app_visuel.py (Version Multi-Postes Pro - PARTIE 4 SUR 7)
-# =====================================================================
+        # Lecture complète incluant le prix d'achat secret
+        lignes = data_base.obtenir_tous_les_stocks_locaux_complets()
+        for id_db, modele, quantite, p_achat in lignes:
+            tableau_stocks.insert("", tk.END, iid=str(id_db), values=(str(modele).strip().upper(), f"{quantite} pcs", f"{p_achat:,} FCFA"))
 
     def action_ajouter_modele():
-        """Crée un nouvel article ou fusionne la quantité si le nom existe déjà (Anti-doublon)."""
-        global entree_modele, entree_qte_stock
         modele = entree_modele.get().strip().lower()
-        qte_texte = entree_qte_stock.get().strip()
+        qte_txt = entree_qte_stock.get().strip()
+        p_achat_txt = entree_prix_achat_stock.get().strip()
             
-        if not modele or not qte_texte:
-            messagebox.showwarning("Champs vides", "Veuillez remplir le modèle et la quantité.")
+        if not all([modele, qte_txt, p_achat_txt]):
+            messagebox.showwarning("Champs vides", "Veuillez remplir le modèle, la quantité et le prix d'achat.")
             return
                 
         try:
-            qte = int(qte_texte)
-            if qte <= 0: raise ValueError
+            qte = int(qte_txt)
+            p_achat = float(p_achat_txt)
+            if qte <= 0 or p_achat < 0: raise ValueError
                 
             connexion = sqlite3.connect(data_base.DB_NAME)
             curseur = connexion.cursor()
-            
             curseur.execute("""
-            INSERT INTO stocks (modele, quantite_dispo) VALUES (?, ?)
-            ON CONFLICT(modele) DO UPDATE SET quantite_dispo = quantite_dispo + ?
-            """, (modele, qte, qte))
+                INSERT INTO stocks (modele, quantite_dispo, prix_achat) VALUES (?, ?, ?)
+                ON CONFLICT(modele) DO UPDATE SET quantite_dispo = quantite_dispo + ?, prix_achat = ?
+            """, (modele, qte, p_achat, qte, p_achat))
             
             curseur.execute("SELECT quantite_dispo FROM stocks WHERE lower(modele) = ?", (modele,))
-            qte_totale = curseur.fetchone()
+            qte_totale = curseur.fetchone()[0]
             connexion.commit()
             connexion.close()
             
-            pousser_stock_vers_cloud(modele, qte_totale)
+            pushing_stock_cloud_complet(modele, qte_totale, p_achat)
             
-            messagebox.showinfo("Inventaire Mis à jour", f"L'article '{modele.upper()}' a été enregistré !")
+            messagebox.showinfo("Succès", f"L'article '{modele.upper()}' a été enregistré avec son prix d'achat !")
             entree_modele.delete(0, tk.END)
             entree_qte_stock.delete(0, tk.END)
+            entree_prix_achat_stock.delete(0, tk.END)
             rafraichir_tableau()
             entree_modele.focus()
         except ValueError:
-            messagebox.showerror("Erreur", "La quantité doit être un entier supérieur à 0.")
+            messagebox.showerror("Erreur", "Données numériques invalides.")
 
-    def action_supprimer_modele():
-        """Supprime l'article sélectionné de façon chirurgicale par son ID unique."""
-        selection = tableau_stocks.selection()
-        if not selection:
-            messagebox.showwarning("Sélection manquante", "Sélectionnez une ligne dans le tableau à supprimer.")
-            return
-            
-        # 🟢 REPARÉ : Extraction de l'ID de la ligne cliquée
-        id_unique_ligne = selection[0]
-        item = tableau_stocks.item(id_unique_ligne)
-        # 🟢 REPARÉ : On extrait le texte pur de la première colonne pour l'API
-        nom_article = item["values"][0]
-
-        if not messagebox.askyesno("Confirmation", f"Voulez-vous retirer uniquement cette ligne « {nom_article} » de l'inventaire ?"): 
-            return
-
-        connexion = sqlite3.connect(data_base.DB_NAME)
-        curseur = connexion.cursor()
-        curseur.execute("DELETE FROM stocks WHERE id = ?", (id_unique_ligne,))
-        article_supprime = curseur.rowcount > 0
-        connexion.commit()
-        connexion.close()
-
-        if article_supprime:
-            pousser_stock_vers_cloud(str(nom_article).lower(), 0)
-            messagebox.showinfo("Succès", "Ligne d'article retirée avec succès.")
-            rafraichir_tableau()
-        else:
-            messagebox.showwarning("Erreur", "Ligne introuvable.")
-
-    def action_clic_bouton_quantite():
-        """Déclenche l'ajout de quantité sur l'article sélectionné."""
-        selection = tableau_stocks.selection()
-        if not selection:
-            messagebox.showwarning("Sélection manquante", "Veuillez cliquer sur une ligne du tableau d'abord.")
-            return
-        # 🟢 REPARÉ : Extraction propre des indices du tuple Tkinter
-        id_cible = selection[0]
-        nom_article = tableau_stocks.item(id_cible)["values"][0]
-        action_ajouter_quantite(id_cible, nom_article)
-
-    # Dessin de la fenêtre des stocks
     admin_stock = Toplevel(FENETRE_PRINCIPALE_LOGIN)
-    admin_stock.title("📦 Gestion des Stocks - Sécurisée par ID")
-    admin_stock.geometry("520x540")
+    admin_stock.title("📦 Inventaire & Coût de Revient (Gérant)")
+    admin_stock.geometry("580x580")
     admin_stock.configure(bg="#f8fafc")
-    admin_stock.resizable(False, False)
     admin_stock.grab_set()
 
-    tk.Label(admin_stock, text="INVENTAIRE DES PRODUITS EN STOCK", font=("Helvetica", 11, "bold"), bg="#0f766e", fg="white", pady=8).pack(fill=tk.X)
+    tk.Label(admin_stock, text="INVENTAIRE COMPLET ET COÛT DE REVIENT", font=("Helvetica", 11, "bold"), bg="#0f766e", fg="white", pady=8).pack(fill=tk.X)
 
     cadre_conteneur = tk.Frame(admin_stock, bg="#f8fafc")
     cadre_conteneur.pack(fill=tk.BOTH, expand=True, padx=15, pady=5)
 
-    tableau_stocks = ttk.Treeview(cadre_conteneur, columns=("Article", "Quantite"), show="headings", height=10)
+    # 🟢 AJOUT DE LA COLONNE PRIX D'ACHAT DANS LA GRILLE DU GÉRANT
+    tableau_stocks = ttk.Treeview(cadre_conteneur, columns=("Article", "Quantite", "PrixAchat"), show="headings", height=10)
     tableau_stocks.heading("Article", text="DÉSIGNATION DE L'ARTICLE")
-    tableau_stocks.heading("Quantite", text="STOCK DISPONIBLE")
-    tableau_stocks.column("Article", width=330, anchor=tk.W)
-    tableau_stocks.column("Quantite", width=130, anchor=tk.CENTER)
+    tableau_stocks.heading("Quantite", text="STOCK")
+    tableau_stocks.heading("PrixAchat", text="PRIX D'ACHAT UNITAIRE")
+    tableau_stocks.column("Article", width=260, anchor=tk.W)
+    tableau_stocks.column("Quantite", width=100, anchor=tk.CENTER)
+    tableau_stocks.column("PrixAchat", width=160, anchor=tk.CENTER)
 
     defilement = ttk.Scrollbar(cadre_conteneur, orient="vertical", command=tableau_stocks.yview)
     tableau_stocks.configure(yscrollcommand=defilement.set)
-    
     tableau_stocks.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
     defilement.pack(side=tk.RIGHT, fill=tk.Y)
 
-    tk.Button(admin_stock, text="➕ AJOUTER QUANTITÉ AU PRODUIT SÉLECTIONNÉ", font=("Helvetica", 9, "bold"), bg="#0f766e", fg="white", command=action_clic_bouton_quantite).pack(fill=tk.X, padx=15, pady=2)
-
-    # Formulaire d'ajouts fixe en bas
-    cadre_ajout = tk.LabelFrame(admin_stock, text="Créer ou Approvisionner un Article", font=("Helvetica", 9, "bold"), bg="#f8fafc", padx=10, pady=6)
+    # Formulaire d'ajouts en bas
+    cadre_ajout = tk.LabelFrame(admin_stock, text="Enregistrer un Nouvel Approvisionnement", font=("Helvetica", 9, "bold"), bg="#f8fafc", padx=10, pady=6)
     cadre_ajout.pack(fill=tk.X, padx=15, pady=10)
 
     tk.Label(cadre_ajout, text="Nom de l'article :", bg="#f8fafc").pack(anchor=tk.W)
@@ -326,15 +261,17 @@ def ouvrir_panneau_stock():
     entree_qte_stock = tk.Entry(cadre_ajout, font=("Helvetica", 10))
     entree_qte_stock.pack(fill=tk.X, pady=2)
 
-    entree_modele.bind("<Return>", lambda event: entree_qte_stock.focus())
-    entree_qte_stock.bind("<Return>", lambda event: action_ajouter_modele())
+    # 🟢 NOUVELLE CASE : Saisie du Prix d'Achat
+    tk.Label(cadre_ajout, text="Prix d'Achat Unitaire secret (FCFA) :", bg="#f8fafc").pack(anchor=tk.W)
+    entree_prix_achat_stock = tk.Entry(cadre_ajout, font=("Helvetica", 10))
+    entree_prix_achat_stock.pack(fill=tk.X, pady=2)
 
     cadre_actions = tk.Frame(cadre_ajout, bg="#f8fafc")
-    cadre_actions.pack(fill=tk.X, pady=6)
-    tk.Button(cadre_actions, text="📥 ENREGISTRER / FUSIONNER", bg="#10b981", fg="white", font=("Helvetica", 9, "bold"), command=action_ajouter_modele).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
-    tk.Button(cadre_actions, text="🗑 SUPPRIMER LIGNE SÉLECTIONNÉE", bg="#dc2626", fg="white", font=("Helvetica", 9, "bold"), command=action_supprimer_modele).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 0))
+    cadre_actions.pack(fill=tk.X, pady=8)
+    tk.Button(cadre_actions, text="📥 ENREGISTRER L'ARTICLE", bg="#10b981", fg="white", font=("Helvetica", 9, "bold"), command=action_ajouter_modele).pack(side=tk.LEFT, fill=tk.X, expand=True)
 
     rafraichir_tableau()
+
 # =====================================================================
 # MODULE 4 : app_visuel.py (Version Multi-Postes Pro - PARTIE 5 SUR 7)
 # =====================================================================
@@ -384,18 +321,23 @@ def ouvrir_panneau_historique():
         except Exception as e:
             messagebox.showerror("Erreur d'écriture", f"Impossible d'exportateur le fichier Excel :\n{e}")
 
+        # Cherche la fonction action_charger_statistiques() dans ton ouvrir_panneau_historique() et remplace-la par celle-ci :
     def action_charger_statistiques():
         tempo = select_tempo.get()
         cible = entree_cible.get().strip()
         
         if not cible:
-            messagebox.showwarning("Critère manquant", "Veuillez entrer une valeur cible (ex: 31/08/2026, 08, 2026).")
+            messagebox.showwarning("Critère manquant", "Veuillez entrer une valeur cible.")
             return
             
         statistiques = data_base.extraire_statistiques_avancees(tempo, cible)
-        label_ca.config(text=f"CHIFFRE D'AFFAIRES TTC : {statistiques['ca_total']} FCFA", bg="#10b981", fg="white")
-        label_top.config(text=f"🔥 Produit Phare sur la période : {statistiques['produit_phare']}")
+        # Calcul du bénéfice net réel basé sur les prix d'achat
+        calcul_gains = data_base.extraire_benefice_net_periode(tempo, cible)
+        
+        label_ca.config(text=f"📊 CA TOTAL TTC : {calcul_gains['ca_total']:,} FCFA | 🔥 BÉNÉFICE NET REEL : {calcul_gains['benefice_net']:,} FCFA", bg="#10b981", fg="white")
+        label_top.config(text=f"🔥 Produit Phare sur la période : {statistiques['produit_phare']} | Coût d'achat total : {calcul_gains['frais_achat']:,} FCFA")
         label_perf.config(text=statistiques['message_performance'])
+
 
     def action_filtrer_par_vendeuse():
         nom_vendeuse = normaliser_nom_caissiere(select_vendeuse.get())
@@ -714,16 +656,31 @@ def ouvrir_comptoir_facturation():
                 }
 
                 threading.Thread(target=synchroniser_vente_cloud, args=(reference_locale, donnees_cloud), daemon=True).start()
-                operation.generer_recu_pdf_industriel(
-                    nom_boutique, num_facture, nom_client, smartphone, desc, qte,
-                    calcul["montant_ht"], calcul["valeur_tva"], calcul["total_ttc"], caissiere_nom
-                )
-                                # 🟢 DÉCLENCHEMENT DU ROULEAU THERMIQUE AUTOMATIQUE
-                imprimer_ticket_thermique_direct(nom_client, smartphone, calcul["total_ttc"], caissiere_nom)
+                
+                # 🟢 DÉTECTION MATÉRIELLE AUTOMATIQUE D'USINE :
+                # On regarde si une imprimante thermique est physiquement branchée et allumée sur Windows
+                thermique_detectee = False
+                try:
+                    liste_imp = [imp[2].lower() for imp in win32print.EnumPrinters(win32print.PRINTER_ENUM_LOCAL | win32print.PRINTER_ENUM_CONNECTIONS)]
+                    if any("thermal" in name or "pos" in name or "58" in name or "80" in name or "xp-" in name for name in liste_imp):
+                        thermique_detectee = True
+                except Exception:
+                    thermique_detectee = False
+
+                if thermique_detectee:
+                    # 📲 OPTION A : Le rouleau thermique est connecté, on imprime le ticket en tâche de fond
+                    imprimer_ticket_thermique_direct(nom_client, smartphone, calcul["total_ttc"], caissiere_nom)
+                else:
+                    # 📄 OPTION B : Pas d'imprimante thermique, on génère la facture classique A5 en PDF
+                    operation.generer_recu_pdf_industriel(
+                        nom_boutique, num_facture, nom_client, smartphone, desc, qte,
+                        calcul["montant_ht"], calcul["valeur_tva"], calcul["total_ttc"], caissiere_nom
+                    )
+
 
 
                 if verif_stock["alerte_patron"]:
-                    messagebox.showwarning("Alerte Stock", f"⚠️ {verif_stock['restant']} pcs")
+                    messagebox.showwarning("Alerte Stock", f"⚠️ il reste : {verif_stock['restant']} pcs")
                     
                 messagebox.showinfo("Succès", f"✅ Vente #{num_facture} émise avec succès !")
                 
@@ -1056,15 +1013,20 @@ def ouvrir_fenetre_paiement():
             
             if reponse.status_code == 200:
                 donnees = reponse.json()
-                if num_momo == "CARTE_BANCAIRE":
+                
+                # 🟢 INTERCEPTATION CARTE : Si le serveur a renvoyé un lien web, on lance le navigateur !
+                if donnees.get("statut") == "SUCCESS_CARD":
+                    lien_securise = donnees.get("lien_web")
                     messagebox.showinfo(
                         "Paiement par Carte", 
-                        "💳 INTERCONNEXION BANCAIRE VISA/MC REUSSIE !\n\nUn lien de facturation international a été raccordé à votre boutique.\n"
-                        "Consultez vos reçus pour finaliser le paiement."
+                        "💳 REDIRECTION SÉCURISÉ VALIDE !\n\nVotre navigateur internet va s'ouvrir sur la page de paiement officielle Mastercard/Visa.\n\nTapez vos coordonnées bancaires en toute sécurité sur cette page."
                     )
+                    # Commande magique qui ouvre automatiquement Google Chrome / Edge sur la page CamPay
+                    webbrowser.open(lien_securise)
                 else:
                     messagebox.showinfo("Paiement Initié", f"📱 {donnees.get('message')}")
                 fenetre_paye.destroy()
+
             else:
                 try: erreur_msg = reponse.json().get("detail", "Refus de la passerelle.")
                 except Exception: erreur_msg = "Erreur de communication avec le serveur."

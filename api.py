@@ -58,6 +58,7 @@ class StockSchemaReseau(BaseModel):
     """Modèle réseau exclusif gérant pour injecter et propager les approvisionnements."""
     modele: str
     quantite_dispo: int
+    prix_achat: float | None = 0.0 # 🟢 Nouveau champ de coût de revient
 
 
 def verifier_cle_api(x_api_key: str | None = Header(default=None)):
@@ -121,24 +122,19 @@ def api_centraliser_vente(donnees: VenteSchemaReseau):
 
 @app.post("/stocks/mettre_a_jour", dependencies=[Depends(verifier_cle_api)])
 def api_mettre_a_jour_stock_central(stock: StockSchemaReseau):
-    """
-    📥 RÉCEPTEUR MULTI-POSTES :
-    Enregistre l'approvisionnement ou l'effacement (quantité à 0) sur le Cloud PostgreSQL.
-    """
     try:
         modele_propre = stock.modele.strip().lower()
-        
-        # 🟢 CONSTRUCTEUR : Si la quantité envoyée est 0, c'est que le gérant a supprimé l'article !
         if stock.quantite_dispo <= 0:
             connexion = sqlite3.connect(data_base.DB_NAME)
             connexion.execute("DELETE FROM stocks WHERE lower(modele) = ?", (modele_propre,))
             connexion.commit()
             connexion.close()
-            return {"statut": "Succès", "message": f"Article '{modele_propre}' supprimé du Cloud."}
+            return {"statut": "Succès", "message": f"Article '{modele_propre}' supprimé."}
             
-        # Sinon, on applique la mise à jour classique de l'approvisionnement
-        data_base.forcer_mise_a_jour_stock_local(modele_propre, stock.quantite_dispo)
-        return {"statut": "Succès", "message": f"Stock de '{modele_propre}' synchronisé."}
+        # 🟢 On propage le stock avec son prix d'achat sur le cloud gérant
+        p_achat = stock.prix_achat if stock.prix_achat is not None else 0.0
+        data_base.forcer_mise_a_jour_stock_local_avec_prix(modele_propre, stock.quantite_dispo, p_achat)
+        return {"statut": "Succès", "message": f"Stock et prix de '{modele_propre}' synchronisés."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -351,12 +347,38 @@ def api_declencher_collecte_momo(payload: dict, x_api_key: str = Header(...)):
     numero_telephone = payload.get("numero", "").strip()
     
     # Si c'est l'option Carte Bancaire internationale, on s'adapte
+        # 🟢 MODIFICATION CONSTRUCTEUR : Génération et renvoi du vrai lien de paiement Visa/Mastercard
     if numero_telephone == "CARTE_BANCAIRE":
-        # Logique optionnelle de génération de lien CamPay pour les cartes Visa/Mastercard
-        return {
-            "statut": "SUCCESS", 
-            "message": "Lien de facturation international Mastercard/Visa initialisé."
+        token_campay = obtenir_token_authentification_campay()
+        if not token_campay:
+            raise HTTPException(status_code=500, detail="Erreur d'authentification passerelle.")
+            
+        # Appel à la route de facturation web de CamPay (Collect Web Link)
+        url_lien = f"{CAMPAY_BASE_URL}/collect-web-link/"
+        entetes = {
+            "Authorization": f"Token {token_campay}",
+            "Content-Type": "application/json"
         }
+        payload_lien = {
+            "amount": "14000",
+            "currency": "XAF",
+            "description": f"Abonnement International Visa/MC - Boutique {cle_boutique[:8]}",
+            "external_reference": cle_boutique
+        }
+        try:
+            reponse_lien = requests.post(url_lien, json=payload_lien, headers=entetes, timeout=10)
+            if reponse_lien.status_code in [200 , 201]:
+                # On extrait le lien de la page internet généré par CamPay
+                lien_paiement_web = reponse_lien.json().get("link")
+                return {
+                    "statut": "SUCCESS_CARD",
+                    "lien_web": lien_paiement_web,
+                    "message": "Lien de paiement par carte Visa/Mastercard généré avec succès."
+                }
+            raise HTTPException(status_code=400, detail="Impossible de générer le lien bancaire.")
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
 
     # Validation stricte d'un vrai numéro africain/camerounais à 9 chiffres
     if not numero_telephone or len(numero_telephone) < 9:
