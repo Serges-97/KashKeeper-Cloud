@@ -94,10 +94,10 @@ def initialisation_systeme():
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         modele TEXT UNIQUE NOT NULL,
         quantite_dispo INTEGER NOT NULL,
-        ventes_cumulees INTEGER DEFAULT 0
         prix_achat REAL DEFAULT 0,
-    )
-    """)
+        ventes_cumulees INTEGER DEFAULT 0
+              )
+          """)
     
     # 📦 PRODUITS ÉLECTRONIQUES CONSERVÉS À L'ALLUMAGE D'USINE
     produits_usine = [
