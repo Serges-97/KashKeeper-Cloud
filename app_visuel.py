@@ -1,5 +1,5 @@
 # =====================================================================
-# MODULE 4 : app_visuel.py (Version Multi-Postes Pro - PARTIE 1 SUR 7)
+# MODULE 4 : app_visuel.py (Version Multi-Postes Pro - ÉTAPE 1 SUR 15)
 # =====================================================================
 import tkinter as tk
 from tkinter import messagebox, simpledialog, Toplevel, ttk
@@ -17,7 +17,6 @@ import win32print
 import win32ui
 import webbrowser
 
-
 # Lancement des configurations SQLite d'usine au démarrage du logiciel
 data_base.initialisation_systeme()
 
@@ -30,7 +29,12 @@ CLE_MASTER_SERGE = "Je suis simple"
 URL_API_KASHFLOW = "https://onrender.com" 
 CLE_API_KASHFLOW = "KASHFLOW_KEY_DEFAUT"
 
-def imprimer_ticket_thermique_direct(client, article, total_ttc, caissiere):
+# Variable globale pour stocker le panier multi-articles en cours de facturation
+PANIER_FACTURE_EN_COURS = []
+# =====================================================================
+# MODULE 4 : app_visuel.py (Version Multi-Postes Pro - ÉTAPE 2 SUR 15)
+# =====================================================================
+def imprimer_ticket_thermique_direct(client, liste_articles, total_ttc, caissiere):
     """Pilote physiquement les bobines de l'imprimante thermique détectée sur le port USB Windows."""
     try:
         nom_boutique = data_base.recuperer_nom_boutique_sql() or "KASHKEEPER BOUTIQUE"
@@ -48,6 +52,7 @@ def imprimer_ticket_thermique_direct(client, article, total_ttc, caissiere):
         date_heure = datetime.now().strftime("%d/%m/%Y  %H:%M")
         separateur = "--------------------------------"
         
+        # Construction de l'en-tête du ticket
         ticket_texte = (
             f"{nom_boutique}\n"
             f"{separateur}\n"
@@ -55,12 +60,23 @@ def imprimer_ticket_thermique_direct(client, article, total_ttc, caissiere):
             f"Caissiere : {str(caissiere).upper()}\n"
             f"Client : {str(client).upper()}\n"
             f"{separateur}\n"
-            f"ARTICLE : {str(article).upper()}\n"
+            f"DÉSIGNATION       QTE    TOTAL\n"
+        )
+        
+        # Ajout dynamique de chaque ligne d'article du panier
+        for art in liste_articles:
+            nom_art = str(art["article"]).upper()[:16]
+            qte_art = art["quantite"]
+            ttc_art = art["total_ttc"]
+            ticket_texte += f"{nom_art:<17} {qte_art:<6} {ttc_art} F\n"
+            
+        # Pied de page du ticket
+        ticket_texte += (
             f"{separateur}\n"
             f"TOTAL NET : {total_ttc} FCFA\n"
             f"{separateur}\n"
             f"Merci pour votre confiance !\n"
-            f"A bientot.\n\n\n\n\n" # Sauts de ligne d'usine pour laisser sortir le papier du massicot
+            f"A bientot.\n\n\n\n\n" # Sauts de ligne d'usine pour la découpe physique
         )
 
         hPrinter = win32print.OpenPrinter(nom_imprimante)
@@ -74,14 +90,15 @@ def imprimer_ticket_thermique_direct(client, article, total_ttc, caissiere):
             win32print.ClosePrinter(hPrinter)
     except Exception as e:
         logging.warning("Erreur physique impression thermique directe : %s", e)
-
+# =====================================================================
+# MODULE 4 : app_visuel.py (Version Multi-Postes Pro - ÉTAPE 3 SUR 15)
+# =====================================================================
 def charger_configuration_externe():
-    """Lit dynamiquement la configuration du client en supportant les espaces, tirets et égaux."""
+    """Lit dynamiquement la configuration réseau du client (config.txt) à la racine de l'exécutable."""
     global URL_API_KASHFLOW, CLE_API_KASHFLOW
     dossier_prog = os.path.dirname(os.path.abspath(__file__))
     fichier_config = os.path.join(dossier_prog, "config.txt")
     
-    # 🟢 SÉCURITÉ CONSTRUCTEUR : Si le fichier n'existe pas, on crée le modèle propre d'usine
     if not os.path.exists(fichier_config):
         with open(fichier_config, "w", encoding="utf-8") as f:
             f.write("# CONFIGURATION RESEAU KASHFLOW MANAGER \n")
@@ -96,7 +113,6 @@ def charger_configuration_externe():
                 if ligne_propre.startswith("#") or not ligne_propre:
                     continue
                 
-                # Détection dynamique du séparateur (soit un tiret, soit un signe égal)
                 separateur = "-" if "-" in ligne_propre else "="
                 if separateur in ligne_propre:
                     cle, valeur = ligne_propre.split(separateur, 1)
@@ -110,7 +126,6 @@ def charger_configuration_externe():
     except Exception as e:
         print(f"[ERREUR CONFIG CONFIG.TXT] : {e}")
 
-
 # Exécution immédiate du chargeur au démarrage de la caisse
 charger_configuration_externe()
 
@@ -120,9 +135,8 @@ def normaliser_nom_caissiere(valeur):
         return "anonyme"
     return str(valeur).strip().lower()
 # =====================================================================
-# MODULE 4 : app_visuel.py (Version Multi-Postes Pro - PARTIE 2 SUR 7)
+# MODULE 4 : app_visuel.py (Version Multi-Postes Pro - ÉTAPE 4 SUR 15)
 # =====================================================================
-
 def synchroniser_vente_cloud(reference_locale, donnees):
     """Envoie une vente au Cloud ou la conserve dans la file locale en cas de coupure."""
     donnees_alignees = {
@@ -133,7 +147,7 @@ def synchroniser_vente_cloud(reference_locale, donnees):
         "prix_ht": donnees["prix_ht"],
         "quantite": donnees["quantite"],
         "caissiere": donnees["caissiere"],
-        "applique_tva_vente": donnees.get("applique_tva", 1)
+        "applique_tva_vente": donnees.get("applique_tva_vente", 1)
     }
     data_base.mettre_en_attente_synchronisation(reference_locale, donnees_alignees)
     synchroniser_file_cloud()
@@ -160,14 +174,10 @@ def synchroniser_file_cloud():
             logging.warning("Synchronisation différée: %s", erreur)
             break
 # =====================================================================
-# MODULE 4 : app_visuel.py (Version Multi-Postes Pro - PARTIE 3 SUR 7)
-# =====================================================================
-
-# =====================================================================
-# 📦 PANNEAU GESTION DE L'INVENTAIRE / STOCKS (EXCLUSIVITÉ GÉRANT)
+# MODULE 4 : app_visuel.py (Version Multi-Postes Pro - ÉTAPE 5 SUR 15)
 # =====================================================================
 def ouvrir_panneau_stock():
-    """Interface d'inventaire moderne réservée au gérant avec affichage secret du Prix d'Achat."""
+    """Interface d'inventaire moderne avec barre de défilement, boutons d'origine restaurés et prix d'achat secret."""
     if SESSION_UTILISATEUR != "gerant":
         messagebox.showerror("Accès Interdit", "Seul le gérant peut modifier l'inventaire.")
         return
@@ -179,43 +189,80 @@ def ouvrir_panneau_stock():
         payload = {"modele": str(modele).strip().lower(), "quantite_dispo": int(quantite), "prix_achat": float(prix_achat)}
         threading.Thread(target=lambda: requests.post(f"{URL_API_KASHFLOW}/stocks/mettre_a_jour", json=payload, headers={"X-API-Key": CLE_API_KASHFLOW}, timeout=6), daemon=True).start()
 
+    def action_ajouter_quantite(id_stock_cible, nom_article_cible):
+        qte = simpledialog.askinteger("Réapprovisionnement", f"Quantité à ajouter pour « {str(nom_article_cible).upper()} » :", parent=admin_stock, minvalue=1)
+        if qte is None: return
+
+        connexion = sqlite3.connect(data_base.DB_NAME)
+        connexion.execute("UPDATE stocks SET quantite_dispo = quantite_dispo + ? WHERE id = ?", (qte, id_stock_cible))
+        row = connexion.execute("SELECT quantite_dispo, prix_achat FROM stocks WHERE id = ?", (id_stock_cible,)).fetchone()
+        qte_totale = row
+        p_achat = row
+        connexion.commit()
+        connexion.close()
+        
+        pushing_stock_cloud_complet(nom_article_cible.strip().lower(), qte_totale, p_achat)
+        rafraichir_tableau()
+        messagebox.showinfo("Inventaire mis à jour", "Stock augmenté avec succès.")
+
     def rafraichir_tableau():
         for i in tableau_stocks.get_children():
             tableau_stocks.delete(i)
-        # Lecture complète incluant le prix d'achat secret
         lignes = data_base.obtenir_tous_les_stocks_locaux_complets()
         for id_db, modele, quantite, p_achat in lignes:
             tableau_stocks.insert("", tk.END, iid=str(id_db), values=(str(modele).strip().upper(), f"{quantite} pcs", f"{p_achat:,} FCFA"))
 
+    def action_ajouter_quantite(id_stock_cible, nom_article_cible):
+        qte = simpledialog.askinteger("Réapprovisionnement", f"Quantité à ajouter pour « {str(nom_article_cible).upper()} » :", parent=admin_stock, minvalue=1)
+        if qte is None: return
+
+        # 🟢 CORRIGÉ : Extraction propre de la variable ID
+        id_propre = id_stock_cible[0] if isinstance(id_stock_cible, (list, tuple)) else id_stock_cible
+
+        connexion = sqlite3.connect(data_base.DB_NAME)
+        connexion.execute("UPDATE stocks SET quantite_dispo = quantite_dispo + ? WHERE id = ?", (qte, id_propre))
+        row = connexion.execute("SELECT quantite_dispo, prix_achat FROM stocks WHERE id = ?", (id_propre,)).fetchone()
+        qte_totale = row[0] if row else qte
+        p_achat = row[1] if row else 0.0
+        connexion.commit()
+        connexion.close()
+        
+        pushing_stock_cloud_complet(str(nom_article_cible).strip().lower(), qte_totale, p_achat)
+        rafraichir_tableau()
+        messagebox.showinfo("Inventaire mis à jour", "Stock augmenté avec succès.")
+
     def action_ajouter_modele():
         modele = entree_modele.get().strip().lower()
-        qte_txt = entree_qte_stock.get().strip()
+        qte_texte = entree_qte_stock.get().strip()
         p_achat_txt = entree_prix_achat_stock.get().strip()
             
-        if not all([modele, qte_txt, p_achat_txt]):
-            messagebox.showwarning("Champs vides", "Veuillez remplir le modèle, la quantité et le prix d'achat.")
+        if not all([modele, qte_texte, p_achat_txt]):
+            messagebox.showwarning("Champs vides", "Veuillez remplir le modèle, la quantité and le prix d'achat.")
             return
                 
         try:
-            qte = int(qte_txt)
+            qte = int(qte_texte)
             p_achat = float(p_achat_txt)
             if qte <= 0 or p_achat < 0: raise ValueError
                 
             connexion = sqlite3.connect(data_base.DB_NAME)
             curseur = connexion.cursor()
             curseur.execute("""
-                INSERT INTO stocks (modele, quantite_dispo, prix_achat) VALUES (?, ?, ?)
-                ON CONFLICT(modele) DO UPDATE SET quantite_dispo = quantite_dispo + ?, prix_achat = ?
+            INSERT INTO stocks (modele, quantite_dispo, prix_achat) VALUES (?, ?, ?)
+            ON CONFLICT(modele) DO UPDATE SET quantite_dispo = quantite_dispo + ?, prix_achat = ?
             """, (modele, qte, p_achat, qte, p_achat))
             
             curseur.execute("SELECT quantite_dispo FROM stocks WHERE lower(modele) = ?", (modele,))
-            qte_totale = curseur.fetchone()[0]
+            row_fetch = curseur.fetchone()
+            
+            # 🟢 CORRIGÉ : On extrait le chiffre brut à l'index 0 pour éviter l'erreur int() argument must be a string
+            qte_totale = int(row_fetch[0]) if row_fetch else qte
             connexion.commit()
             connexion.close()
             
             pushing_stock_cloud_complet(modele, qte_totale, p_achat)
             
-            messagebox.showinfo("Succès", f"L'article '{modele.upper()}' a été enregistré avec son prix d'achat !")
+            messagebox.showinfo("Inventaire Mis à jour", f"L'article '{modele.upper()}' a été enregistré !")
             entree_modele.delete(0, tk.END)
             entree_qte_stock.delete(0, tk.END)
             entree_prix_achat_stock.delete(0, tk.END)
@@ -224,24 +271,62 @@ def ouvrir_panneau_stock():
         except ValueError:
             messagebox.showerror("Erreur", "Données numériques invalides.")
 
+# =====================================================================
+# MODULE 4 : app_visuel.py (Version Multi-Postes Pro - ÉTAPE 6 SUR 15)
+# =====================================================================
+    def action_supprimer_modele():
+        selection = tableau_stocks.selection()
+        if not selection:
+            messagebox.showwarning("Sélection manquante", "Sélectionnez une ligne dans le tableau à supprimer.")
+            return
+            
+        # 🟢 CORRIGÉ : Extraction de l'ID pour la suppression sans crash de tuple
+        id_unique_ligne = selection[0]
+        item = tableau_stocks.item(id_unique_ligne)
+        valeurs = item["values"]
+        nom_article = valeurs[0] if valeurs else "article"
+
+        if not messagebox.askyesno("Confirmation", f"Voulez-vous retirer uniquement la ligne « {nom_article} » de l'inventaire ?"): 
+            return
+
+        connexion = sqlite3.connect(data_base.DB_NAME)
+        curseur = connexion.cursor()
+        curseur.execute("DELETE FROM stocks WHERE id = ?", (id_unique_ligne,))
+        article_supprime = curseur.rowcount > 0
+        connexion.commit()
+        connexion.close()
+
+        if article_supprime:
+            pushing_stock_cloud_complet(str(nom_article).lower(), 0, 0)
+            messagebox.showinfo("Succès", "Ligne d'article retirée avec succès.")
+            rafraichir_tableau()
+
+    def action_clic_bouton_quantite():
+        selection = tableau_stocks.selection()
+        if not selection:
+            messagebox.showwarning("Sélection manquante", "Veuillez cliquer sur une ligne du tableau d'abord.")
+            return
+        id_cible = selection
+        nom_article = tableau_stocks.item(id_cible)["values"]
+        action_ajouter_quantite(id_cible, nom_article)
+
     admin_stock = Toplevel(FENETRE_PRINCIPALE_LOGIN)
-    admin_stock.title("📦 Inventaire & Coût de Revient (Gérant)")
-    admin_stock.geometry("580x580")
+    admin_stock.title("📦 Gestion des Stocks - Sécurisée par ID")
+    admin_stock.geometry("560x580")
     admin_stock.configure(bg="#f8fafc")
+    admin_stock.resizable(False, False)
     admin_stock.grab_set()
 
-    tk.Label(admin_stock, text="INVENTAIRE COMPLET ET COÛT DE REVIENT", font=("Helvetica", 11, "bold"), bg="#0f766e", fg="white", pady=8).pack(fill=tk.X)
-
+    tk.Label(admin_stock, text="INVENTAIRE DES PRODUITS EN STOCK", font=("Helvetica", 11, "bold"), bg="#0f766e", fg="white", pady=8).pack(fill=tk.X)
     cadre_conteneur = tk.Frame(admin_stock, bg="#f8fafc")
     cadre_conteneur.pack(fill=tk.BOTH, expand=True, padx=15, pady=5)
 
-    # 🟢 AJOUT DE LA COLONNE PRIX D'ACHAT DANS LA GRILLE DU GÉRANT
     tableau_stocks = ttk.Treeview(cadre_conteneur, columns=("Article", "Quantite", "PrixAchat"), show="headings", height=10)
     tableau_stocks.heading("Article", text="DÉSIGNATION DE L'ARTICLE")
-    tableau_stocks.heading("Quantite", text="STOCK")
+    tableau_stocks.heading("Quantite", text="STOCK DISPONIBLE")
     tableau_stocks.heading("PrixAchat", text="PRIX D'ACHAT UNITAIRE")
-    tableau_stocks.column("Article", width=260, anchor=tk.W)
-    tableau_stocks.column("Quantite", width=100, anchor=tk.CENTER)
+    tableau_stocks.column("Article", width=240, anchor=tk.W)
+    tableau_stocks.column("Quantite", width=110, anchor=tk.CENTER)
     tableau_stocks.column("PrixAchat", width=160, anchor=tk.CENTER)
 
     defilement = ttk.Scrollbar(cadre_conteneur, orient="vertical", command=tableau_stocks.yview)
@@ -249,8 +334,9 @@ def ouvrir_panneau_stock():
     tableau_stocks.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
     defilement.pack(side=tk.RIGHT, fill=tk.Y)
 
-    # Formulaire d'ajouts en bas
-    cadre_ajout = tk.LabelFrame(admin_stock, text="Enregistrer un Nouvel Approvisionnement", font=("Helvetica", 9, "bold"), bg="#f8fafc", padx=10, pady=6)
+    tk.Button(admin_stock, text="➕ AJOUTER QUANTITÉ AU PRODUIT SÉLECTIONNÉ", font=("Helvetica", 9, "bold"), bg="#0f766e", fg="white", command=action_clic_bouton_quantite).pack(fill=tk.X, padx=15, pady=2)
+
+    cadre_ajout = tk.LabelFrame(admin_stock, text="Créer ou Approvisionner un Article", font=("Helvetica", 9, "bold"), bg="#f8fafc", padx=10, pady=6)
     cadre_ajout.pack(fill=tk.X, padx=15, pady=10)
 
     tk.Label(cadre_ajout, text="Nom de l'article :", bg="#f8fafc").pack(anchor=tk.W)
@@ -261,120 +347,251 @@ def ouvrir_panneau_stock():
     entree_qte_stock = tk.Entry(cadre_ajout, font=("Helvetica", 10))
     entree_qte_stock.pack(fill=tk.X, pady=2)
 
-    # 🟢 NOUVELLE CASE : Saisie du Prix d'Achat
     tk.Label(cadre_ajout, text="Prix d'Achat Unitaire secret (FCFA) :", bg="#f8fafc").pack(anchor=tk.W)
     entree_prix_achat_stock = tk.Entry(cadre_ajout, font=("Helvetica", 10))
     entree_prix_achat_stock.pack(fill=tk.X, pady=2)
 
+    # Liens clavier Entrée pour le formulaire d'inventaire
+    entree_modele.bind("<Return>", lambda event: entree_qte_stock.focus())
+    entree_qte_stock.bind("<Return>", lambda event: entree_prix_achat_stock.focus())
+    entree_prix_achat_stock.bind("<Return>", lambda event: action_ajouter_modele())
+
     cadre_actions = tk.Frame(cadre_ajout, bg="#f8fafc")
-    cadre_actions.pack(fill=tk.X, pady=8)
-    tk.Button(cadre_actions, text="📥 ENREGISTRER L'ARTICLE", bg="#10b981", fg="white", font=("Helvetica", 9, "bold"), command=action_ajouter_modele).pack(side=tk.LEFT, fill=tk.X, expand=True)
+    cadre_actions.pack(fill=tk.X, pady=6)
+    tk.Button(cadre_actions, text="📥 ENREGISTRER / FUSIONNER", bg="#10b981", fg="white", font=("Helvetica", 9, "bold"), command=action_ajouter_modele).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
+    tk.Button(cadre_actions, text="🗑 SUPPRIMER LIGNE SÉLECTIONNÉE", bg="#dc2626", fg="white", font=("Helvetica", 9, "bold"), command=action_supprimer_modele).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 0))
 
     rafraichir_tableau()
-
 # =====================================================================
-# MODULE 4 : app_visuel.py (Version Multi-Postes Pro - PARTIE 5 SUR 7)
+# MODULE 4 : app_visuel.py (Version Multi-Postes Pro - ÉTAPE 7 SUR 15)
 # =====================================================================
-
-# --- 3. PANNEAU D'AUDIT COMPTABLE TEMPOREL ET FILTRAGE VISIBLE ---
 def ouvrir_panneau_historique():
-    """Ouvre l'espace analytique et force l'affichage complet de la grille des ventes."""
+    """Tableau de bord d'analyse du Chiffre d'Affaires et du Bénéfice Net déduisant les salaires."""
     if SESSION_UTILISATEUR != "gerant":
         messagebox.showerror("Accès Interdit", "Seul le gérant a accès aux rapports financiers.")
         return
 
     def action_exporter_registre_excel():
-        """Génère un fichier CSV (Excel) haute clarté directement sur le bureau du gérant."""
+        """Génère un rapport d'audit CSV d'usine directement dans le même dossier que l'exécutable."""
         import csv
-        import sys
-        
-        # Détermination de l'emplacement dynamique du bureau de l'utilisateur
-        bureau_pc = os.path.join(os.path.expanduser("~"), "Desktop")
-        if not os.path.exists(bureau_pc):
-            bureau_pc = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
-            
+        dossier_actuel = os.path.dirname(os.path.abspath(__file__))
         horodatage = datetime.now().strftime("%d_%m_%Y_%H%M")
-        nom_fichier_csv = os.path.join(bureau_pc, f"KashKeeper_Rapport_Ventes_{horodatage}.csv")
+        nom_fichier_csv = os.path.join(dossier_actuel, f"KashKeeper_Rapport_Ventes_{horodatage}.csv")
         
         try:
             ventes_brutes = data_base.obtenir_registre_ventes_brutes()
             if not ventes_brutes:
-                messagebox.showwarning("Registre vide", "Aucune transaction enregistrée en base pour le moment.")
+                messagebox.showwarning("Registre vide", "Aucune transaction enregistrée.")
                 return
                 
-            # Écriture industrielle du fichier Excel avec encodage universel anti-bug d'accents
             with open(nom_fichier_csv, mode="w", newline="", encoding="utf-8-sig") as f:
-                ecrivain = csv.writer(f, delimiter=";") # Point-virgule pour l'alignement Excel automatique
-                
-                # Écriture de la ligne d'en-tête officielle du tableur
+                ecrivain = csv.writer(f, delimiter=";")
                 ecrivain.writerow([
                     "N° FACTURE", "CLIENT", "ARTICLE / MODELE", "IMEI / SERIE / SAV", 
                     "MONTANT HT (FCFA)", "VALEUR TVA (FCFA)", "TOTAL NET TTC (FCFA)", 
                     "CAISSIERE EMETTEUR", "DATE FACTURATION", "HEURE", "SYNCHRONISÉ CLOUD"
                 ])
-                
-                # Injection de toutes les lignes comptables
                 for ligne in ventes_brutes:
                     ecrivain.writerow(ligne)
                     
-            messagebox.showinfo("Exportation Réussie", f"📊 RAPPORT COMPTABLE GÉNÉRÉ !\n\nLe fichier Excel a été créé avec succès sur votre bureau sous le nom :\n« KashKeeper_Rapport_Ventes_{horodatage}.csv »")
+            messagebox.showinfo("Exportation Réussie", f"📊 RAPPORT COMPTABLE GÉNÉRÉ !\n\nLe fichier Excel a été créé dans le dossier racine du logiciel :\n« {nom_fichier_csv} »")
         except Exception as e:
-            messagebox.showerror("Erreur d'écriture", f"Impossible d'exportateur le fichier Excel :\n{e}")
+            messagebox.showerror("Erreur d'écriture", f"Impossible d'exporter le fichier Excel :\n{e}")
 
-        # Cherche la fonction action_charger_statistiques() dans ton ouvrir_panneau_historique() et remplace-la par celle-ci :
     def action_charger_statistiques():
         tempo = select_tempo.get()
         cible = entree_cible.get().strip()
         
         if not cible:
-            messagebox.showwarning("Critère manquant", "Veuillez entrer une valeur cible.")
+            messagebox.showwarning("Critère manquant", "Veuillez entrer une valeur cible (ex: 27/9/2026, 9, 2026).")
             return
             
-        statistiques = data_base.extraire_statistiques_avancees(tempo, cible)
-        # Calcul du bénéfice net réel basé sur les prix d'achat
-        calcul_gains = data_base.extraire_benefice_net_periode(tempo, cible)
-        
-        label_ca.config(text=f"📊 CA TOTAL TTC : {calcul_gains['ca_total']:,} FCFA | 🔥 BÉNÉFICE NET REEL : {calcul_gains['benefice_net']:,} FCFA", bg="#10b981", fg="white")
-        label_top.config(text=f"🔥 Produit Phare sur la période : {statistiques['produit_phare']} | Coût d'achat total : {calcul_gains['frais_achat']:,} FCFA")
-        label_perf.config(text=statistiques['message_performance'])
+        try:
+            statistiques = data_base.extraire_statistiques_avancees(tempo, cible)
+            calcul_gains = data_base.extraire_benefice_net_periode(tempo, cible)
+            
+            # 🟢 AFFICHAGE COMPTABLE NET COHÉRENT : S'allume à 0 si la date est fausse
+            label_ca.config(
+                text=f"📊 CA TOTAL TTC : {calcul_gains['ca_total']:,} FCFA | 🔥 BÉNÉFICE NET REEL : {calcul_gains['benefice_net']:,} FCFA", 
+                bg="#10b981", 
+                fg="white",
+                font=("Helvetica", 11, "bold")
+            )
+            label_top.config(
+                text=f"🔥 Produit Phare : {statistiques['produit_phare']} | Coût d'achat stock : {calcul_gains['frais_achat']:,} FCFA | 👥 Charges salariales : {calcul_gains['charges_salaires']:,} FCFA",
+                font=("Helvetica", 9, "bold")
+            )
+            label_perf.config(text=statistiques['message_performance'])
+        except Exception as e:
+            messagebox.showerror("Erreur d'analyse", f"Impossible de charger les données financières :\n{e}")
+            
+            
+# =====================================================================
+# MODULE 4 : app_visuel.py (Version Multi-Postes Pro - ÉTAPE 8 SUR 15)
+# =====================================================================
 
+    # =====================================================================
+    # 🟢 POP-UP DE DOUBLE-CLIC : Affiche le détail complet d'une facture de gros
+    # =====================================================================
+    def action_double_clic_detail_facture(event):
+        """Ouvre une mini-fenêtre propre affichant la liste complète des articles sans aucune coupure textuelle."""
+        selection = grille_audit.selection()
+        if not selection: return
+        
+        ligne_id = selection[0]
+        valeurs = grille_audit.item(ligne_id)["values"]
+        
+        num_facture = valeurs[0]
+        client_nom = valeurs[1]
+        # 🟢 RECONSTRUCTION DU TEXTE : On récupère la description complète stockée en cache caché ou reconstruite
+        articles_complets = valeurs[2]
+        net_ttc = valeurs[3]
+        date_v = valeurs[4]
+        caissiere_v = valeurs[5]
+        
+        pop_detail = Toplevel(audit)
+        pop_detail.title(f"📄 Détail Facture de Gros #{str(num_facture).zfill(4)}")
+        pop_detail.geometry("460x280")
+        pop_detail.configure(bg="#f8fafc")
+        pop_detail.grab_set()
+        
+        tk.Label(pop_detail, text=f"FACTURE #{str(num_facture).zfill(4)} - {client_nom}", font=("Helvetica", 10, "bold"), bg="#1e293b", fg="white", pady=6).pack(fill=tk.X)
+        
+        cadre_corps = tk.Frame(pop_detail, bg="#f8fafc", padx=15, pady=10)
+        cadre_corps.pack(fill=tk.BOTH, expand=True)
+        
+        texte_details = tk.Text(cadre_corps, font=("Helvetica", 10), bg="white", bd=2, wrap=tk.WORD)
+        texte_details.pack(fill=tk.BOTH, expand=True)
+        
+        # Récupération de la chaîne brute stockée dans l'élément d'origine pour afficher l'article masqué (TECNO)
+        id_item_selectionne = grille_audit.selection()[0]
+        for v_origin in data_base.recuper_tout_les_ventes():
+            if isinstance(v_origin, (tuple, list)) and str(v_origin[0]) == str(num_facture):
+                articles_complets = str(v_origin[2]).upper()
+                break
+                
+        contenu_affichage = f"📅 DATE DE LA VENTE : {date_v}\n" \
+                            f"👥 CAISSIÈRE ÉMETTRICE : {caissiere_v}\n" \
+                            f"💳 NET TTC À PAYER : {net_ttc}\n" \
+                            f"----------------------------------------\n" \
+                            f"📦 LISTE DES MARCHANDISES COMPLÈTE :\n{articles_complets.replace(', ', '\n')}"
+                            
+        texte_details.insert(tk.END, contenu_affichage)
+        texte_details.config(state=tk.DISABLED)
+        
+        tk.Button(pop_detail, text="❌ FERMER", bg="#dc2626", fg="white", font=("Helvetica", 9, "bold"), command=pop_detail.destroy).pack(fill=tk.X, pady=5)
 
     def action_filtrer_par_vendeuse():
+        """Filtre l'historique global du gérant en combinant la caissière sélectionnée et les critères temporels stricts."""
         nom_vendeuse = normaliser_nom_caissiere(select_vendeuse.get())
-        if not nom_vendeuse or nom_vendeuse == "anonyme":
-            messagebox.showwarning("Champ vide", "Veuillez sélectionner une caissière.")
-            return
+        if not nom_vendeuse or nom_vendeuse == "anonyme": return
             
-        for i in grille_audit.get_children():
+        for i in grille_audit.get_children(): 
             grille_audit.delete(i)
             
         ventes_filtrees = data_base.recuperer_ventes_par_caissiere(nom_vendeuse)
-        if not ventes_filtrees:
-            messagebox.showinfo("Rapport", f"Aucune vente pour : {nom_vendeuse}")
-            return
-            
-        for v in ventes_filtrees:
-            facture_no = v[0]
-            client = v[1]
-            art_propre = str(v[2]).strip()
-            montant_ttc = f"{v[3]} FCFA" if "FCFA" not in str(v[3]) else v[3]
-            date_formatee = v[4]
-            heure = v[5]
-            grille_audit.insert("", tk.END, values=(facture_no, client, art_propre, montant_ttc, f"{date_formatee} à {heure}", nom_vendeuse.upper()))
+        
+        # Récupération des critères temporels du gérant
+        valeur_temporelle = entree_cible.get().strip()
+        periode_choisie = select_tempo.get() # "JOUR", "MOIS" ou "ANNEE"
+        
+        total_ca_cible = 0.0
+
+        for index, v in enumerate(ventes_filtrees, start=1):
+            if isinstance(v, (tuple, list)) and len(v) >= 4:
+                num_id = v[0]
+                client_nom = str(v[1]).upper()
+                articles_bruts = str(v[2]).upper()
+                net_ttc_total = f"{float(v[6]):,} FCFA" if len(v) > 6 else f"{float(v[3]):,} FCFA"
+                
+                # Extraction de la vraie date DD/MM/YYYY
+                date_facture = str(v[8]).strip() if len(v) > 8 else (str(v[4]).strip() if len(v) > 4 else "29/09/2026")
+                caissiere_emetteur = str(v[7]).upper() if len(v) > 7 else (str(v[5]).upper() if len(v) > 5 else nom_vendeuse.upper())
+                
+                # 🟢 APPLICATION DU FILTRAGE TEMPOREL ULTRA-STRICT DEMANDÉ
+                if valeur_temporelle:
+                    garder_ligne = False
+                    if periode_choisie == "JOUR" and date_facture == valeur_temporelle:
+                        garder_ligne = True
+                    elif periode_choisie == "MOIS" and date_facture.endswith(valeur_temporelle if valeur_temporelle.startswith("/") else f"/{valeur_temporelle}"):
+                        garder_ligne = True
+                    elif periode_choisie == "ANNEE" and date_facture.endswith(valeur_temporelle):
+                        garder_ligne = True
+                        
+                    if not garder_ligne:
+                        continue
+
+                articles_visuels = articles_bruts if len(articles_bruts) < 32 else articles_bruts[:30] + "..."
+                grille_audit.insert("", tk.END, values=(num_id, client_nom, articles_visuels, net_ttc_total, date_facture, caissiere_emetteur))
+                
+                try:
+                    prix_brut = float(v[6]) if len(v) > 6 else float(v[3])
+                    total_ca_cible += prix_brut
+                except Exception:
+                    pass
+            else:
+                num_id = str(index)
+                client_nom = "CLIENT UNIQUE"
+                articles_bruts = str(v).upper()
+                articles_visuels = articles_bruts if len(articles_bruts) < 32 else articles_bruts[:30] + "..."
+                grille_audit.insert("", tk.END, values=(num_id, client_nom, articles_visuels, "Voir reçu", "29/09/2026", nom_vendeuse.upper()))
+
+        # Mise à jour du CA dynamique correspondant strictement à la cible filtrée de la caissière
+        label_ca.config(text=f"📊 CA FILTRÉ ({nom_vendeuse.upper()}) : {total_ca_cible:,} FCFA", bg="#0284c7", fg="white")
 
     def action_afficher_tout_historique():
-        for i in grille_audit.get_children():
+        """Affiche l'intégralité des ventes de la boutique et applique le filtrage temporel strict sur le CA global du gérant."""
+        for i in grille_audit.get_children(): 
             grille_audit.delete(i)
+            
         toutes_les_ventes = data_base.recuper_tout_les_ventes()
         
-        for v in toutes_les_ventes:
-            facture_no = v[0]
-            client = v[1]
-            art_propre = str(v[2]).strip()
-            montant_ttc = f"{v[3]} FCFA" if "FCFA" not in str(v[3]) else v[3]
-            date_formatee = v[4]
-            caissiere_nom = str(v[5]).upper()
-            grille_audit.insert("", tk.END, values=(facture_no, client, art_propre, montant_ttc, date_formatee, caissiere_nom))
+        valeur_temporelle = entree_cible.get().strip()
+        periode_choisie = select_tempo.get()
+        
+        total_ca_cible = 0.0
+
+        for index, v in enumerate(toutes_les_ventes, start=1):
+            if isinstance(v, (tuple, list)) and len(v) >= 4:
+                num_id = v[0]
+                client_nom = str(v[1]).upper()
+                articles_bruts = str(v[2]).upper()
+                net_ttc_total = f"{float(v[6]):,} FCFA" if len(v) > 6 else f"{float(v[3]):,} FCFA"
+                
+                date_facture = str(v[8]).strip() if len(v) > 8 else (str(v[4]).strip() if len(v) > 4 else "29/09/2026")
+                caissiere_emetteur = str(v[7]).upper() if len(v) > 7 else (str(v[5]).upper() if len(v) > 5 else "ENTREPRISE")
+                
+                # 🟢 APPLICATION DU FILTRAGE TEMPOREL ULTRA-STRICT DEMANDÉ
+                if valeur_temporelle:
+                    garder_ligne = False
+                    if periode_choisie == "JOUR" and date_facture == valeur_temporelle:
+                        garder_ligne = True
+                    elif periode_choisie == "MOIS" and date_facture.endswith(valeur_temporelle if valeur_temporelle.startswith("/") else f"/{valeur_temporelle}"):
+                        garder_ligne = True
+                    elif periode_choisie == "ANNEE" and date_facture.endswith(valeur_temporelle):
+                        garder_ligne = True
+                        
+                    if not garder_ligne:
+                        continue
+
+                articles_visuels = articles_bruts if len(articles_bruts) < 32 else articles_bruts[:30] + "..."
+                grille_audit.insert("", tk.END, values=(num_id, client_nom, articles_visuels, net_ttc_total, date_facture, caissiere_emetteur))
+                
+                try:
+                    prix_brut = float(v[6]) if len(v) > 6 else float(v[3])
+                    total_ca_cible += prix_brut
+                except Exception:
+                    pass
+            else:
+                num_id = str(index)
+                client_nom = "ACHAT GLOBAL"
+                articles_bruts = str(v).upper()
+                articles_visuels = articles_bruts if len(articles_bruts) < 32 else articles_bruts[:30] + "..."
+                grille_audit.insert("", tk.END, values=(num_id, client_nom, articles_visuels, "N/A", "29/09/2026", "CAISSE"))
+
+        # Si une analyse statistique globale a déjà été lancée par le bouton ANALYSER, on ne force pas l'écrasement du bandeau vert principal
+        if valeur_temporelle:
+            label_ca.config(text=f"📊 CHIFFRE D'AFFAIRES SUR LA CIBLE FILTRÉE : {total_ca_cible:,} FCFA", bg="#0f766e", fg="white")
 
     audit = Toplevel(FENETRE_PRINCIPALE_LOGIN)
     audit.title("📊 Tableau de Bord Économique")
@@ -384,22 +601,21 @@ def ouvrir_panneau_historique():
 
     tk.Label(audit, text="RAPPORT D'AUDIT COMPTABLE ANALYTIQUE", font=("Helvetica", 11, "bold"), bg="#1e293b", fg="white", pady=8).pack(fill=tk.X)
 
-    # Zone du haut : Comparatifs et CA
-    cadre_stat = tk.LabelFrame(audit, text="Analyse Temporelle Comparative (N vs N-1)", bg="#f8fafc", padx=10, pady=8)
+    cadre_stat = tk.LabelFrame(audit, text="Analyse Temporelle Comparative (CA vs Masse Salariale)", bg="#f8fafc", padx=10, pady=8)
     cadre_stat.pack(fill=tk.X, padx=15, pady=10)
 
     tk.Label(cadre_stat, text="Période :", bg="#f8fafc").grid(row=0, column=0, padx=5, sticky=tk.W)
     select_tempo = ttk.Combobox(cadre_stat, values=["JOUR", "MOIS", "ANNEE"], width=10, state="readonly")
-    select_tempo.grid(row=0, column=1, padx=5)
-    select_tempo.current(0)
+    select_tempo.grid(row=0, column=1, padx=5); select_tempo.current(0)
 
     tk.Label(cadre_stat, text="Cible :", bg="#f8fafc").grid(row=0, column=2, padx=5, sticky=tk.W)
     entree_cible = tk.Entry(cadre_stat, width=12, font=("Helvetica", 10), bd=2)
     entree_cible.grid(row=0, column=3, padx=5)
+    entree_cible.bind("<Return>", lambda event: action_charger_statistiques())
 
     tk.Button(cadre_stat, text="🔍 ANALYSER", font=("Helvetica", 9, "bold"), bg="#1e293b", fg="white", command=action_charger_statistiques).grid(row=0, column=4, padx=10)
 
-    label_ca = tk.Label(cadre_stat, text="CHIFFRE D'AFFAIRES TTC : 0.00 FCFA", font=("Helvetica", 11, "bold"), bg="#e2e8f0", fg="#1e293b", pady=6)
+    label_ca = tk.Label(cadre_stat, text="CHIFFRE D'AFFAIRES TTC : 0.00 FCFA | Gain Net : 0.00 FCFA", font=("Helvetica", 11, "bold"), bg="#e2e8f0", fg="#1e293b", pady=6)
     label_ca.grid(row=1, column=0, columnspan=5, sticky=tk.EW, pady=6)
     
     label_top = tk.Label(cadre_stat, text="🔥 Produit Phare : Aucun", font=("Helvetica", 10), bg="#f8fafc", fg="#0f766e", anchor=tk.W)
@@ -408,48 +624,154 @@ def ouvrir_panneau_historique():
     label_perf = tk.Label(cadre_stat, text="📈 En attente d'analyse...", font=("Helvetica", 10, "italic"), bg="#f8fafc", fg="#475569", anchor=tk.W)
     label_perf.grid(row=3, column=0, columnspan=5, sticky=tk.EW, pady=2)
 
-    # Zone du bas : Le registre de la grille visible
-    cadre_grille = tk.LabelFrame(audit, text="Registre des transactions et ventes", bg="#f8fafc", padx=10, pady=8)
+    cadre_grille = tk.LabelFrame(audit, text="Registre des transactions (Double-cliquez sur une ligne pour voir le détail complet)", bg="#f8fafc", padx=10, pady=8)
     cadre_grille.pack(fill=tk.BOTH, expand=True, padx=15, pady=10)
 
     cadre_filtre_nom = tk.Frame(cadre_grille, bg="#f8fafc")
     cadre_filtre_nom.pack(fill=tk.X, pady=4)
     
     tk.Label(cadre_filtre_nom, text="Caissière :", bg="#f8fafc").pack(side=tk.LEFT, padx=2)
-    
     liste_caissieres = data_base.recuperer_liste_tous_employes()
     select_vendeuse = ttk.Combobox(cadre_filtre_nom, values=liste_caissieres, width=18, state="readonly")
-    if liste_caissieres:
-        select_vendeuse.current(0)
+    if liste_caissieres: select_vendeuse.current(0)
     select_vendeuse.pack(side=tk.LEFT, padx=4)
     
     tk.Button(cadre_filtre_nom, text="🎯 Filtrer", bg="#475569", fg="white", font=("Helvetica", 8, "bold"), command=action_filtrer_par_vendeuse).pack(side=tk.LEFT, padx=4)
     tk.Button(cadre_filtre_nom, text="📋 Afficher Tout", bg="#0284c7", fg="white", font=("Helvetica", 8, "bold"), command=action_afficher_tout_historique).pack(side=tk.RIGHT, padx=4)
-
-    # 🟢 INTEGRATION DU BOUTON PHYSIQUE EXCEL (A gauche de Afficher Tout pour un rendu Pro)
-    tk.Button(
-        cadre_filtre_nom, 
-        text="📥 EXPORTER SUR EXCEL", 
-        bg="#10b981", 
-        fg="white", 
-        font=("Helvetica", 8, "bold"), 
-        command=action_exporter_registre_excel
-    ).pack(side=tk.RIGHT, padx=8)
+    tk.Button(cadre_filtre_nom, text="📥 EXPORTER SUR EXCEL", bg="#10b981", fg="white", font=("Helvetica", 8, "bold"), command=action_exporter_registre_excel).pack(side=tk.RIGHT, padx=8)
 
     grille_audit = ttk.Treeview(cadre_grille, columns=("ID", "Client", "Article", "Total TTC", "Date/Heure", "Émetteur"), show="headings", height=8)
     grille_audit.heading("ID", text="N°"); grille_audit.heading("Client", text="CLIENT"); grille_audit.heading("Article", text="ARTICLE"); grille_audit.heading("Total TTC", text="NET TTC"); grille_audit.heading("Date/Heure", text="TEMPOREL"); grille_audit.heading("Émetteur", text="CAISSIÈRE")
-    
     grille_audit.column("ID", width=40, anchor=tk.CENTER); grille_audit.column("Client", width=110, anchor=tk.W); grille_audit.column("Article", width=140, anchor=tk.W); grille_audit.column("Total TTC", width=110, anchor=tk.CENTER); grille_audit.column("Date/Heure", width=120, anchor=tk.CENTER); grille_audit.column("Émetteur", width=80, anchor=tk.CENTER)
-    grille_audit.pack(fill=tk.BOTH, expand=True, pady=5)
+    
+    # 🟢 ANCRAGE ÉVÉNEMENT DU DOUBLE-CLIC SUR LA GRILLE
+    grille_audit.bind("<Double-1>", action_double_clic_detail_facture)
+
+    defilement_audit = ttk.Scrollbar(cadre_grille, orient="vertical", command=grille_audit.yview)
+    grille_audit.configure(yscrollcommand=defilement_audit.set)
+    grille_audit.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+    defilement_audit.pack(side=tk.RIGHT, fill=tk.Y)
 
     action_afficher_tout_historique()
 
+    
+    
+    
 # =====================================================================
-# MODULE 4 : app_visuel.py (Version Multi-Postes Pro - PARTIE 6 SUR 7)
+# MODULE 4 : app_visuel.py (Version Multi-Postes Pro - ÉTAPE 9 SUR 15)
 # =====================================================================
+def ouvrir_panneau_employes():
+    """Interface d'administration de la liste des employés et de configuration de leurs salaires."""
+    if SESSION_UTILISATEUR != "gerant":
+        messagebox.showerror("Accès Interdit", "Espace réservé au gérant de la boutique.")
+        return
 
-# --- 4. CONFIGURATION ET RAJOUT DU PERSONNEL (EXCLUSIVITÉ GÉRANT) ---
+    def rafraichir_liste_employes():
+        for i in tableau_emp.get_children(): tableau_emp.delete(i)
+        lignes = data_base.obtenir_tous_les_employes_complets()
+        for id_db, identifiant, role, salaire in lignes:
+            tableau_emp.insert("", tk.END, iid=str(id_db), values=(str(identifiant).upper(), str(role).upper(), f"{salaire:,} FCFA"))
+
+    def action_definir_salaire():
+        selection = tableau_emp.selection()
+        if not selection:
+            messagebox.showwarning("Sélection manquante", "Veuillez sélectionner un employé dans la grille.")
+            return
+        id_emp = selection[0]
+        nom_emp = tableau_emp.item(id_emp)["values"][0]
+        
+        nouveau_salaire = simpledialog.askfloat("RH - Masse Salariale", f"Définir le salaire mensuel fixe pour {nom_emp} (FCFA) :", minvalue=0, parent=fenetre_emp)
+        if nouveau_salaire is not None:
+            data_base.modifier_salaire_employe_sql(id_emp, nouveau_salaire)
+            messagebox.showinfo("Succès", f"Fiche de paie de {nom_emp} mise à jour.")
+            rafraichir_liste_employes()
+
+    def action_creer_employe_grille():
+        nom = entree_emp_nom.get().strip().lower()
+        mdp = entree_emp_mdp.get().strip()
+        sal_txt = entree_emp_sal.get().strip()
+        
+        if not all([nom, mdp, sal_txt]):
+            messagebox.showwarning("Champs vides", "Veuillez remplir le nom, le mot de passe et le salaire.")
+            return
+        try:
+            salaire = float(sal_txt)
+            if data_base.ajouter_nouvel_employe_sql(nom, mdp, 1, salaire):
+                messagebox.showinfo("Succès", f"L'employé '{nom.upper()}' a été ajouté avec succès.")
+                entree_emp_nom.delete(0, tk.END); entree_emp_mdp.delete(0, tk.END); entree_emp_sal.delete(0, tk.END)
+                rafraichir_liste_employes()
+                entree_emp_nom.focus()
+            else: messagebox.showerror("Erreur", "Cet identifiant existe déjà.")
+        except ValueError: messagebox.showerror("Erreur", "Le salaire doit être un nombre valide.")
+
+    def action_supprimer_employe_grille():
+        selection = tableau_emp.selection()
+        if not selection:
+            messagebox.showwarning("Sélection manquante", "Sélectionnez un employé à supprimer.")
+            return
+        id_emp = selection[0]
+        nom_emp = tableau_emp.item(id_emp)["values"][0]
+        if messagebox.askyesno("Confirmation", f"Voulez-vous licencier définitivement l'employé « {nom_emp} » ?"):
+            connexion = sqlite3.connect(data_base.DB_NAME)
+            connexion.execute("DELETE FROM employes WHERE id = ?", (id_emp,))
+            connexion.commit(); connexion.close()
+            messagebox.showinfo("Succès", "Employé retiré du registre.")
+            rafraichir_liste_employes()
+
+    fenetre_emp = Toplevel(FENETRE_PRINCIPALE_LOGIN)
+    fenetre_emp.title("👥 Administration des RH - Registre du Personnel")
+    fenetre_emp.geometry("560x580")
+    fenetre_emp.configure(bg="#f8fafc")
+    fenetre_emp.resizable(False, False); fenetre_emp.grab_set()
+
+    tk.Label(fenetre_emp, text="REGISTRE DU PERSONNEL & CHARGES SALARIALES", font=("Helvetica", 11, "bold"), bg="#1e3a8a", fg="white", pady=8).pack(fill=tk.X)
+    cadre_table = tk.Frame(fenetre_emp, bg="#f8fafc")
+    cadre_table.pack(fill=tk.BOTH, expand=True, padx=15, pady=5)
+
+    tableau_emp = ttk.Treeview(cadre_table, columns=("Nom", "Role", "Salaire"), show="headings", height=8)
+    tableau_emp.heading("Nom", text="IDENTIFIANT EMPLOYÉ"); tableau_emp.heading("Role", text="PRIVILÈGE ACCÈS"); tableau_emp.heading("Salaire", text="SALAIRE MENSUEL")
+    tableau_emp.column("Nom", width=200, anchor=tk.W); tableau_emp.column("Role", width=120, anchor=tk.CENTER); tableau_emp.column("Salaire", width=160, anchor=tk.CENTER)
+    
+    defilement_emp = ttk.Scrollbar(cadre_table, orient="vertical", command=tableau_emp.yview)
+    tableau_emp.configure(yscrollcommand=defilement_emp.set)
+    tableau_emp.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+    defilement_emp.pack(side=tk.RIGHT, fill=tk.Y)
+
+    tk.Button(fenetre_emp, text="💳 AJOUTER / AJUSTER LE SALAIRE DE L'EMPLOYÉ SÉLECTIONNÉ", font=("Helvetica", 9, "bold"), bg="#10b981", fg="white", command=action_definir_salaire).pack(fill=tk.X, padx=15, pady=2)
+
+    cadre_form = tk.LabelFrame(fenetre_emp, text="Créer un Nouveau Contrat Employé", font=("Helvetica", 9, "bold"), bg="#f8fafc", padx=10, pady=6)
+    cadre_form.pack(fill=tk.X, padx=15, pady=10)
+
+    tk.Label(cadre_form, text="Identifiant / Nom de connexion :", bg="#f8fafc").pack(anchor=tk.W)
+    entree_emp_nom = tk.Entry(cadre_form, font=("Helvetica", 10))
+    entree_emp_nom.pack(fill=tk.X, pady=2)
+
+    tk.Label(cadre_form, text="Mot de passe initial :", bg="#f8fafc").pack(anchor=tk.W)
+    entree_emp_mdp = tk.Entry(cadre_form, font=("Helvetica", 10))
+    entree_emp_mdp.pack(fill=tk.X, pady=2)
+
+    tk.Label(cadre_form, text="Salaire mensuel de base (FCFA) :", bg="#f8fafc").pack(anchor=tk.W)
+    entree_emp_sal = tk.Entry(cadre_form, font=("Helvetica", 10))
+    entree_emp_sal.pack(fill=tk.X, pady=2)
+
+    # Configuration des liens de focalisation par la touche Entrée clavier
+    entree_emp_nom.bind("<Return>", lambda event: entree_emp_mdp.focus())
+    entree_emp_mdp.bind("<Return>", lambda event: entree_emp_sal.focus())
+    entree_emp_sal.bind("<Return>", lambda event: action_creer_employe_grille())
+
+    cadre_act_rh = tk.Frame(cadre_form, bg="#f8fafc")
+    cadre_act_rh.pack(fill=tk.X, pady=6)
+    tk.Button(cadre_act_rh, text="👥 CRÉER COMPTE COMPTOIR", bg="#3b82f6", fg="white", font=("Helvetica", 9, "bold"), command=action_creer_employe_grille).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
+    tk.Button(cadre_act_rh, text="🗑️ RETIRER DU REGISTRE PERSONNEL", bg="#dc2626", fg="white", font=("Helvetica", 9, "bold"), command=action_supprimer_employe_grille).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 0))
+
+    rafraichir_liste_employes()
+
+
+# =====================================================================
+# MODULE 4 : app_visuel.py (Version Multi-Postes Pro - ÉTAPE 10 SUR 15)
+# =====================================================================
 def ouvrir_panneau_administration():
+    """Ancienne fenêtre d'ajout basique caissière conservée à l'identique pour la configuration fiscale."""
     if SESSION_UTILISATEUR != "gerant":
         messagebox.showerror("Accès Interdit", "Seul le gérant configure le personnel.")
         return
@@ -463,18 +785,15 @@ def ouvrir_panneau_administration():
         if not nom or not code:
             messagebox.showwarning("Champs vides", "Remplissez toutes les cases.")
             return
-        if data_base.ajouter_nouvel_employe_sql(nom, code, applique_tva):
-            messagebox.showinfo("Succès", f"Compte de la caissière '{nom.upper()}' créé !")
-            entree_nouveau_nom.delete(0, tk.END)
-            entree_nouveau_code.delete(0, tk.END)
-        else:
-            messagebox.showerror("Erreur", "Identifiant déjà pris.")
+        if data_base.ajouter_nouvel_employe_sql(nom, code, applique_tva, 0):
+            messagebox.showinfo("Succès", f"Régime fiscal configuré pour '{nom.upper()}' !")
+            entree_nouveau_nom.delete(0, tk.END); entree_nouveau_code.delete(0, tk.END)
+        else: messagebox.showerror("Erreur", "Identifiant déjà pris.")
 
     admin = Toplevel(FENETRE_PRINCIPALE_LOGIN)
-    admin.title("⚙️ Gestion Personnel")
-    admin.geometry("400x380")
-    admin.configure(bg="#f8fafc")
-    admin.grab_set()
+    admin.title("⚙️ Configuration Fiscale Personnel")
+    admin.geometry("400x320")
+    admin.configure(bg="#f8fafc"); admin.grab_set()
 
     tk.Label(admin, text="AJOUTER UNE NOUVELLE CAISSIÈRE", font=("Helvetica", 11, "bold"), bg="#475569", fg="white", pady=6).pack(fill=tk.X)
     cadre = tk.Frame(admin, bg="#f8fafc", padx=15, pady=15)
@@ -490,91 +809,70 @@ def ouvrir_panneau_administration():
 
     tk.Label(cadre, text="Appliquer la TVA sur ses ventes ?", bg="#f8fafc").pack(anchor=tk.W, pady=2)
     select_tva_personnel = ttk.Combobox(cadre, values=["Oui (Grande Entreprise)", "Non (Petite Boutique)"], state="readonly")
-    select_tva_personnel.pack(fill=tk.X, pady=4)
-    select_tva_personnel.current(0)
+    select_tva_personnel.pack(fill=tk.X, pady=4); select_tva_personnel.current(0)
 
-    tk.Button(cadre, text="➕ CRÉER LE COMPTE SÉCURISÉ", bg="#3b82f6", fg="white", font=("Helvetica", 9, "bold"), command=action_ajouter_caissier, pady=6).pack(fill=tk.X, pady=15)
-
-
+    tk.Button(cadre, text="➕ CRÉER LE COMPTE SÉCURISÉ", bg="#475569", fg="white", font=("Helvetica", 9, "bold"), command=action_ajouter_caissier, pady=6).pack(fill=tk.X, pady=15)
 # =====================================================================
-# INTERFACE PRINCIPALE : COMPTOIR DE FACTURATION ET LOGIQUE DE FLUX
+# MODULE 4 : app_visuel.py (Version Multi-Postes Pro - ÉTAPE 11 SUR 15)
 # =====================================================================
 def ouvrir_comptoir_facturation():
-    """Interface de vente principale pour les caissières et le gérant avec mise à jour des stocks."""
-    global SESSION_UTILISATEUR, NOM_CAISSIERE_ACTIVE, NOM_BOUTIQUE_FIXE
+    """Interface de vente principale prenant en charge les paniers multi-articles en gros et le défilement."""
+    global SESSION_UTILISATEUR, NOM_CAISSIERE_ACTIVE, NOM_BOUTIQUE_FIXE, PANIER_FACTURE_EN_COURS
 
     nom_boutique_fixe = (data_base.recuperer_nom_boutique_sql() or NOM_BOUTIQUE_FIXE).upper()
     NOM_BOUTIQUE_FIXE = nom_boutique_fixe
+    PANIER_FACTURE_EN_COURS = [] # Réinitialisation à l'ouverture du tiroir
 
     comptoir = Toplevel(FENETRE_PRINCIPALE_LOGIN)
     comptoir.title(f"💳 KASHFLOW Comptoir - Session {NOM_CAISSIERE_ACTIVE.upper()}")
-    comptoir.geometry("480x720")
+    comptoir.geometry("540x780") # Largeur élargie pour accueillir la grille du panier en gros
     comptoir.configure(bg="#f8fafc")
 
     def rafraichir_stocks_depuis_cloud():
-        """Interroge l'API Cloud pour mettre à jour les stocks locaux (Mise à jour descendante)."""
-        if not URL_API_KASHFLOW or not CLE_API_KASHFLOW:
-            return
+        if not URL_API_KASHFLOW or not CLE_API_KASHFLOW: return
         try:
-            reponse = requests.get(
-                f"{URL_API_KASHFLOW}/stocks/etat",
-                headers={"X-API-Key": CLE_API_KASHFLOW},
-                timeout=5
-            )
+            reponse = requests.get(f"{URL_API_KASHFLOW}/stocks/etat", headers={"X-API-Key": CLE_API_KASHFLOW}, timeout=5)
             if reponse.status_code == 200:
-                donnees_serveur = reponse.json()
-                for item in donnees_serveur.get("inventaire_magasin", []):
+                for item in reponse.json().get("inventaire_magasin", []):
                     art = item.get("article_modele", "")
                     qte = item.get("quantite_restante", 0)
-                    if art:
-                        data_base.forcer_mise_a_jour_stock_local(art, qte)
-                
+                    if art: data_base.forcer_mise_a_jour_stock_local(art, qte)
                 actualiser_liste_deroulante_smartphones()
-        except Exception as e:
-            logging.warning("Erreur rafraîchissement descendant des stocks : %s", e)
+        except Exception as e: logging.warning("Erreur rafraîchissement stocks : %s", e)
 
     def actualiser_liste_deroulante_smartphones():
-        """Recharge les produits disponibles dans la liste déroulante Tkinter en lettres majuscules."""
         try:
             connexion = sqlite3.connect(data_base.DB_NAME)
             curseur = connexion.cursor()
             curseur.execute("SELECT modele FROM stocks WHERE quantite_dispo > 0")
             modeles = [str(row[0]).strip().upper() for row in curseur.fetchall()]
             connexion.close()
-            
             liste_smartphones["values"] = modeles
-            if modeles and not liste_smartphones.get():
-                liste_smartphones.current(0)
-        except Exception:
-            pass
+            if modeles and not liste_smartphones.get(): liste_smartphones.current(0)
+        except Exception: pass
 
     def planifier_synchronisation_et_ecoute():
-        """Planifie l'envoi et la réception asynchrone toutes les 30 secondes."""
         if comptoir.winfo_exists():
             threading.Thread(target=synchroniser_file_cloud, daemon=True).start()
             threading.Thread(target=rafraichir_stocks_depuis_cloud, daemon=True).start()
             comptoir.after(30000, planifier_synchronisation_et_ecoute)
 
-    # Allumage immédiat des threads réseau en arrière-plan
     threading.Thread(target=synchroniser_file_cloud, daemon=True).start()
     threading.Thread(target=rafraichir_stocks_depuis_cloud, daemon=True).start()
     comptoir.after(30000, planifier_synchronisation_et_ecoute)
 
     tk.Label(comptoir, text=f"{nom_boutique_fixe} - COMPTOIR DE FACTURATION", font=("Helvetica", 12, "bold"), bg="#0f766e", fg="white", pady=8).pack(fill=tk.X)
-
+# =====================================================================
+# MODULE 4 : app_visuel.py (Version Multi-Postes Pro - ÉTAPE 12 SUR 15)
+# =====================================================================
     def verifier_connexion_cloud():
-        """Effectue une vérification discrète de la liaison avec Render au démarrage."""
         try:
             reponse = requests.get(URL_API_KASHFLOW, timeout=4)
-            if reponse.status_code == 200:
-                label_statut_cloud.config(text="CONNECTÉ 🟢", fg="#10b981")
-            else:
-                label_statut_cloud.config(text="📡 SERVEUR EN LIGNE (RÉPONSE INCONNUE) 🟡", fg="#f59e0b")
-        except Exception:
-            label_statut_cloud.config(text=" déconnecté 🔴", fg="#dc2626")
+            if reponse.status_code == 200: label_statut_cloud.config(text="CONNECTÉ 🟢", fg="#10b981")
+            else: label_statut_cloud.config(text="📡 SERVEUR EN LIGNE 🟡", fg="#f59e0b")
+        except Exception: label_statut_cloud.config(text=" DÉCONNECTÉ 🔴", fg="#dc2626")
 
     def forcer_test_reseau():
-        """Bouton manuel pour forcer le diagnostic réseau et rafraîchir l'inventaire."""
         label_statut_cloud.config(text="🔄 Connexion en cours...", fg="#94a3b8")
         comptoir.update_idletasks()
         try:
@@ -582,187 +880,458 @@ def ouvrir_comptoir_facturation():
             if reponse.status_code == 200:
                 label_statut_cloud.config(text="📡 CLOUD CONNECTÉ : EN DIRECT 🟢", fg="#10b981")
                 threading.Thread(target=rafraichir_stocks_depuis_cloud, daemon=True).start()
-                messagebox.showinfo("Réseau OK", "Connexion et mise à jour des stocks réussies !")
-            else:
-                label_statut_cloud.config(text="📡 SERVEUR EN LIGNE (RÉPONSE INCONNUE) 🟡", fg="#f59e0b")
+                messagebox.showinfo("Réseau OK", "Liaisons d'antennes d'usine synchronisées !")
+            else: label_statut_cloud.config(text="📡 SERVEUR EN LIGNE 🟡", fg="#f59e0b")
         except Exception:
-            label_statut_cloud.config(text="📡 CLOUD DÉCONNECTÉ (PAS D'INTERNET) 🔴", fg="#dc2626")
-            messagebox.showwarning("Réseau Coupé", "Impossible de joindre le serveur. Fonctionnement local activé.")
+            label_statut_cloud.config(text="📡 CLOUD DÉCONNECTÉ 🔴", fg="#dc2626")
+            messagebox.showwarning("Réseau Coupé", "Fonctionnement local asynchrone activé.")
 
-    # Zone d'affichage du statut Cloud sous le titre
     label_statut_cloud = tk.Label(comptoir, text="📡 VÉRIFICATION DU STATUT RÉSEAU...", font=("Helvetica", 10, "bold"), bg="#1e3a8a", fg="white")
     label_statut_cloud.pack(pady=2)
     
     btn_test_reseau = tk.Button(comptoir, text="🔄 Tester la liaison Cloud", font=("Helvetica", 8, "bold"), bg="#1e293b", fg="white", command=forcer_test_reseau)
     btn_test_reseau.pack(pady=2)
-    
     comptoir.after(1000, verifier_connexion_cloud)
-# =====================================================================
-# MODULE 4 : app_visuel.py (Version Multi-Postes Pro - PARTIE 7A SUR 7)
-# =====================================================================
 
-    def action_bouton_enregistrer():
-        """Valide la saisie, applique la déduction fiscale et enregistre la vente."""
+    # Cadre de saisie principal du comptoir
+    cadre = tk.Frame(comptoir, bg="#f8fafc", padx=15, pady=5)
+    cadre.pack(fill=tk.X)
+
+    tk.Label(cadre, text="Client :", bg="#f8fafc", font=("Helvetica", 10, "bold")).pack(anchor=tk.W)
+    entree_client = tk.Entry(cadre, font=("Helvetica", 11), bd=2)
+    entree_client.pack(fill=tk.X, pady=2)
+
+    tk.Label(cadre, text="Sélectionner l'Article :", bg="#f8fafc", font=("Helvetica", 10, "bold")).pack(anchor=tk.W)
+    liste_smartphones = ttk.Combobox(cadre, state="readonly", font=("Helvetica", 10))
+    actualiser_liste_deroulante_smartphones()
+    liste_smartphones.pack(fill=tk.X, pady=2)
+
+    tk.Label(cadre, text="Description unique (N° IMEI, Série, SAV) :", bg="#f8fafc", font=("Helvetica", 10, "bold")).pack(anchor=tk.W)
+    entree_desc = tk.Entry(cadre, font=("Helvetica", 11), bd=2)
+    entree_desc.pack(fill=tk.X, pady=2)
+
+    tk.Label(cadre, text="Prix Unitaire HT (FCFA) :", bg="#f8fafc", font=("Helvetica", 10, "bold")).pack(anchor=tk.W)
+    entree_prix = tk.Entry(cadre, font=("Helvetica", 11), bd=2)
+    entree_prix.pack(fill=tk.X, pady=2)
+
+    tk.Label(cadre, text="Quantité :", bg="#f8fafc", font=("Helvetica", 10, "bold")).pack(anchor=tk.W)
+    entree_quantite = tk.Entry(cadre, font=("Helvetica", 11), bd=2)
+    entree_quantite.pack(fill=tk.X, pady=2)
+
+    var_tva_directe = tk.BooleanVar(value=True)
+    if SESSION_UTILISATEUR == "gerant":
+        case_tva = tk.Checkbutton(cadre, text="Facturer la TVA (19.25%) sur cette vente", variable=var_tva_directe, bg="#f8fafc", font=("Helvetica", 10, "bold"), fg="#1e3a8a")
+        case_tva.pack(anchor=tk.W, pady=4)
+# =====================================================================
+# MODULE 4 : app_visuel.py (Version Multi-Postes Pro - ÉTAPE 13 SUR 15)
+# =====================================================================
+    # 🟢 CADRE GRILLE : Panier multi-articles défilant (Vente en gros)
+    cadre_panier = tk.LabelFrame(comptoir, text="Panier de la Facture Unique (Vente en Gros)", font=("Helvetica", 9, "bold"), bg="#f8fafc", padx=10, pady=5)
+    cadre_panier.pack(fill=tk.BOTH, expand=True, padx=15, pady=5)
+
+    grille_panier = ttk.Treeview(cadre_panier, columns=("Article", "PU_HT", "Qte", "Mnt_HT", "Mnt_TVA", "Net_TTC"), show="headings", height=5)
+    grille_panier.heading("Article", text="ARTICLE"); grille_panier.heading("PU_HT", text="P.U HT"); grille_panier.heading("Qte", text="QTE"); grille_panier.heading("Mnt_HT", text="TOT HT"); grille_panier.heading("Mnt_TVA", text="TVA"); grille_panier.heading("Net_TTC", text="NET TTC")
+    
+    grille_panier.column("Article", width=140, anchor=tk.W); grille_panier.column("PU_HT", width=70, anchor=tk.CENTER); grille_panier.column("Qte", width=40, anchor=tk.CENTER); grille_panier.column("Mnt_HT", width=70, anchor=tk.CENTER); grille_panier.column("Mnt_TVA", width=70, anchor=tk.CENTER); grille_panier.column("Net_TTC", width=80, anchor=tk.CENTER)
+    
+    scroll_panier = ttk.Scrollbar(cadre_panier, orient="vertical", command=grille_panier.yview)
+    grille_panier.configure(yscrollcommand=scroll_panier.set)
+    grille_panier.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+    scroll_panier.pack(side=tk.RIGHT, fill=tk.Y)
+
+    def actualiser_affichage_grille_panier():
+        for i in grille_panier.get_children(): grille_panier.delete(i)
+        for idx, p in enumerate(PANIER_FACTURE_EN_COURS):
+            grille_panier.insert("", tk.END, iid=str(idx), values=(p["article"].upper(), f"{p['prix_unitaire']:,}", p["quantite"], f"{p['total_ht']:,}", f"{p['total_tva']:,}", f"{p['total_ttc']:,}"))
+
+    def action_ajouter_panier_souris():
+        """Bouton exclusif souris : MOTEUR DE GROS. Ajoute une ligne d'article uniquement dans le panier virtuel."""
         caissiere_nom = str(NOM_CAISSIERE_ACTIVE).strip().lower()
-        nom_client = entree_client.get().strip()
         smartphone = liste_smartphones.get().strip().lower()
         desc = entree_desc.get().strip()
         prix_txt = entree_prix.get().strip()
         qte_txt = entree_quantite.get().strip()
 
-        if not all([nom_client, smartphone, desc, prix_txt, qte_txt]):
-            messagebox.showwarning("Champs incomplets", "Remplissez tous les champs obligatoires.")
+        if not all([smartphone, prix_txt, qte_txt]):
+            messagebox.showwarning("Incomplet", "Sélectionnez un article, un prix et une quantité valide.")
             return
-
         try:
             prix = float(prix_txt)
             qte = int(qte_txt)
             if prix <= 0 or qte <= 0: raise ValueError
         except ValueError:
-            messagebox.showerror("Erreur", "Prix et quantité invalides.")
+            messagebox.showerror("Erreur", "Données numériques invalides.")
             return
 
-        try:
-            verif_stock = data_base.verifier_et_reduire_stock(smartphone, qte)
-            if not verif_stock["autorise"]:
-                messagebox.showerror("Stock Insuffisant", verif_stock["reason"])
-                return
+        applique_tva = 1 if (SESSION_UTILISATEUR == "gerant" and var_tva_directe.get()) or (SESSION_UTILISATEUR != "gerant" and data_base.obtenir_regime_tva_employe(caissiere_nom) == 1) else 0
+        calcul = operation.calculer_facture_dynamique(prix, qte, applique_tva)
+        
+        # 🟢 STOCKAGE MÉMOIRE EXCLUSIF : Zéro écriture en base de données ici
+        PANIER_FACTURE_EN_COURS.append({
+            "article": smartphone, 
+            "description_unique": desc if desc else "AUCUN SPECI.", 
+            "prix_unitaire": prix, 
+            "quantite": qte,
+            "total_ht": calcul["montant_ht"], 
+            "total_tva": calcul["valeur_tva"], 
+            "total_ttc": calcul["total_ttc"], 
+            "tva_appliquee": applique_tva
+        })
 
-            if SESSION_UTILISATEUR == "gerant":
-                applique_tva = 1 if var_tva_directe.get() else 0
-            else:
-                applique_tva = data_base.obtenir_regime_tva_employe(caissiere_nom)
+        actualiser_affichage_grille_panier()
+        entree_desc.delete(0, tk.END)
+        entree_prix.delete(0, tk.END)
+        entree_quantite.delete(0, tk.END)
+        liste_smartphones.focus()
+
+    def action_cloturer_la_facture_souris():
+        """Bouton exclusif souris : Valide l'encaissement et trie (Article Unique VS Facture de Gros)."""
+        caissiere_nom = str(NOM_CAISSIERE_ACTIVE).strip().lower()
+        nom_client = entree_client.get().strip()
+        nom_boutique = data_base.recuperer_nom_boutique_sql() or "DS STOR"
+        
+        if not nom_client:
+            messagebox.showwarning("Client manquant", "Veuillez renseigner le nom du client acheteur.")
+            return
+
+        reference_locale = str(uuid.uuid4())
+
+        # =====================================================================
+        # 📄 CAS N°1 : LE PANIER EST VIDE ➔ CLIENT CLASSIQUE (ARTICLE UNIQUE)
+        # =====================================================================
+        if not PANIER_FACTURE_EN_COURS:
+            smartphone = liste_smartphones.get().strip().lower()
+            desc = entree_desc.get().strip()
+            prix_txt = entree_prix.get().strip()
+            qte_txt = entree_quantite.get().strip()
+            
+            if not all([smartphone, prix_txt, qte_txt]):
+                messagebox.showwarning("Panier vide", "Veuillez ajouter des articles au panier ou remplir les champs pour une vente directe.")
+                return
                 
+            try:
+                prix = float(prix_txt)
+                qte = int(qte_txt)
+                if prix <= 0 or qte <= 0: raise ValueError
+            except ValueError:
+                messagebox.showerror("Erreur", "Données numériques invalides dans les champs de vente.")
+                return
+                
+            verif = data_base.verifier_et_reduire_stock(smartphone, qte)
+            if not verif["autorise"]:
+                messagebox.showerror("Stock insuffisant", f"Action annulée : {verif['reason']}")
+                return
+                
+            applique_tva = 1 if (SESSION_UTILISATEUR == "gerant" and var_tva_directe.get()) or (SESSION_UTILISATEUR != "gerant" and data_base.obtenir_regime_tva_employe(caissiere_nom) == 1) else 0
             calcul = operation.calculer_facture_dynamique(prix, qte, applique_tva)
-            nom_boutique = data_base.recuperer_nom_boutique_sql() or "KASHFLOW_MANAGER"
-            reference_locale = str(uuid.uuid4())
+            
+            string_articles = f"{smartphone.upper()} (x{qte})"
+            string_desc = desc if desc else "AUCUN SPECI."
             
             num_facture = data_base.enregistrer_vente_sql(
-                nom_client, smartphone, desc,
-                calcul["montant_ht"], calcul["valeur_tva"], calcul["total_ttc"],
+                nom_client, string_articles, string_desc, 
+                calcul["montant_ht"], calcul["valeur_tva"], calcul["total_ttc"], 
                 caissiere_nom, reference_locale
             )
 
             if num_facture:
-                donnees_cloud = {
-                    "reference_locale": reference_locale,
-                    "client": str(nom_client).strip(),
-                    "article": str(smartphone).strip(),
-                    "description_unique": str(desc).strip(),
-                    "prix_ht": float(prix),
-                    "quantite": int(qte),
-                    "caissiere": str(caissiere_nom).strip().lower(),
-                    "applique_tva_vente": int(applique_tva)
-                }
+                panier_virtuel_unique = [{
+                    "article": smartphone,
+                    "description_unique": string_desc,
+                    "quantite": qte,
+                    "montant_ht": calcul["montant_ht"],
+                    "total_ttc": calcul["total_ttc"]
+                }]
 
-                threading.Thread(target=synchroniser_vente_cloud, args=(reference_locale, donnees_cloud), daemon=True).start()
+                operation.generer_recu_pdf_industriel(
+                    nom_boutique, num_facture, nom_client, "SANS_TEL", 
+                    panier_virtuel_unique, caissiere_nom, 
+                    calcul["montant_ht"], calcul["valeur_tva"], calcul["total_ttc"]
+                )
                 
-                # 🟢 DÉTECTION MATÉRIELLE AUTOMATIQUE D'USINE :
-                # On regarde si une imprimante thermique est physiquement branchée et allumée sur Windows
-                thermique_detectee = False
                 try:
                     liste_imp = [imp[2].lower() for imp in win32print.EnumPrinters(win32print.PRINTER_ENUM_LOCAL | win32print.PRINTER_ENUM_CONNECTIONS)]
-                    if any("thermal" in name or "pos" in name or "58" in name or "80" in name or "xp-" in name for name in liste_imp):
-                        thermique_detectee = True
+                    if any(mot in name for mot in ["thermal", "pos", "58", "80", "xp-"] for name in liste_imp):
+                        imprimer_ticket_thermique_direct(nom_client, panier_virtuel_unique, calcul["total_ttc"], caissiere_nom)
                 except Exception:
-                    thermique_detectee = False
+                    pass
 
-                if thermique_detectee:
-                    # 📲 OPTION A : Le rouleau thermique est connecté, on imprime le ticket en tâche de fond
-                    imprimer_ticket_thermique_direct(nom_client, smartphone, calcul["total_ttc"], caissiere_nom)
-                else:
-                    # 📄 OPTION B : Pas d'imprimante thermique, on génère la facture classique A5 en PDF
-                    operation.generer_recu_pdf_industriel(
-                        nom_boutique, num_facture, nom_client, smartphone, desc, qte,
-                        calcul["montant_ht"], calcul["valeur_tva"], calcul["total_ttc"], caissiere_nom
+                donnees_cloud = {"client": nom_client, "article": string_articles, "description_unique": string_desc, "prix_ht": calcul["montant_ht"], "quantite": qte, "caissiere": caissiere_nom, "applique_tva_vente": applique_tva}
+                threading.Thread(target=synchroniser_vente_cloud, args=(reference_locale, donnees_cloud), daemon=True).start()
+
+                if verif.get("alerte_patron"):
+                    messagebox.showwarning("Alerte Stock", f"⚠️ Attention, il ne reste que : {verif['restant']} pcs")
+
+                messagebox.showinfo("Facturation Clôturée", f"✅ Vente directe #{str(num_facture).zfill(4)} émise avec succès !")
+
+        # =====================================================================
+        # 🗂️ CAS N°2 : LE PANIER EST PLEIN ➔ FACTURE DE GROS (MULTI-LIGNES)
+        # =====================================================================
+        else:
+            try:
+                general_ht = sum(p["total_ht"] for p in PANIER_FACTURE_EN_COURS)
+                general_tva = sum(p["total_tva"] for p in PANIER_FACTURE_EN_COURS)
+                general_ttc = sum(p["total_ttc"] for p in PANIER_FACTURE_EN_COURS)
+                
+                string_articles = ", ".join([f"{p['article'].upper()} (x{p['quantite']})" for p in PANIER_FAURS_EN_COURS]) if 'PANIER_FAURS_EN_COURS' in locals() else ", ".join([f"{p['article'].upper()} (x{p['quantite']})" for p in PANIER_FACTURE_EN_COURS])
+                string_desc = " | ".join([f"{p['article'].upper()}: {p['description_unique']}" for p in PANIER_FACTURE_EN_COURS])
+                
+                num_facture = data_base.enregistrer_vente_sql(
+                    nom_client, string_articles, string_desc, 
+                    general_ht, general_tva, general_ttc, 
+                    caissiere_nom, reference_locale
+                )
+
+                if num_facture:
+                    operation.generer_facture_gros_pdf_industriel(
+                        nom_boutique, num_facture, nom_client, 
+                        PANIER_FACTURE_EN_COURS, caissiere_nom, 
+                        general_ht, general_tva, general_ttc
                     )
 
+                    try:
+                        liste_imp = [imp[2].lower() for imp in win32print.EnumPrinters(win32print.PRINTER_ENUM_LOCAL | win32print.PRINTER_ENUM_CONNECTIONS)]
+                        if any(mot in name for mot in ["thermal", "pos", "58", "80", "xp-"] for name in liste_imp):
+                            imprimer_ticket_thermique_direct(nom_client, PANIER_FACTURE_EN_COURS, general_ttc, caissiere_nom)
+                    except Exception:
+                        pass
+
+                    donnees_cloud = {"client": nom_client, "article": string_articles, "description_unique": string_desc, "prix_ht": general_ht, "quantite": 1, "caissiere": caissiere_nom, "applique_tva_vente": 1}
+                    threading.Thread(target=synchroniser_vente_cloud, args=(reference_locale, donnees_cloud), daemon=True).start()
+
+                    messagebox.showinfo("Facturation Clôturée", f"✅ Facture de Gros #{str(num_facture).zfill(4)} émise avec succès !\nNet à payer : {general_ttc:,} FCFA")
+
+            except Exception as e:
+                messagebox.showerror("Erreur système", f"Échec de validation de la facture de gros : {e}")
+
+        # Nettoyage
+        PANIER_FACTURE_EN_COURS.clear()
+        actualiser_affichage_grille_panier()
+        entree_client.delete(0, tk.END)
+        entree_desc.delete(0, tk.END)
+        entree_prix.delete(0, tk.END)
+        entree_quantite.delete(0, tk.END)
+        actualiser_liste_deroulante_smartphones()
+        entree_client.focus()
 
 
-                if verif_stock["alerte_patron"]:
-                    messagebox.showwarning("Alerte Stock", f"⚠️ il reste : {verif_stock['restant']} pcs")
-                    
-                messagebox.showinfo("Succès", f"✅ Vente #{num_facture} émise avec succès !")
-                
-                entree_client.delete(0, tk.END)
-                entree_desc.delete(0, tk.END)
-                entree_prix.delete(0, tk.END)
-                entree_quantite.delete(0, tk.END)
-                actualiser_liste_deroulante_smartphones()
-                entree_client.focus()
-        except Exception as e:
-            messagebox.showerror("Erreur Système", f"Une erreur s'est produite : {str(e)}")
-
-    # Construction du cadre de saisie principal du comptoir
-    cadre = tk.Frame(comptoir, bg="#f8fafc", padx=15, pady=10)
-    cadre.pack(fill=tk.BOTH, expand=True)
-
-    tk.Label(cadre, text="Client :", bg="#f8fafc", font=("Helvetica", 10, "bold")).pack(anchor=tk.W)
-    entree_client = tk.Entry(cadre, font=("Helvetica", 11), bd=2)
-    entree_client.pack(fill=tk.X, pady=4)
-
-    tk.Label(cadre, text="Sélectionner l'Article :", bg="#f8fafc", font=("Helvetica", 10, "bold")).pack(anchor=tk.W)
-    liste_smartphones = ttk.Combobox(cadre, state="readonly", font=("Helvetica", 10))
-    actualiser_liste_deroulante_smartphones()
-    liste_smartphones.pack(fill=tk.X, pady=4)
-
-    tk.Label(cadre, text="Description unique (N° IMEI, Série, SAV) :", bg="#f8fafc", font=("Helvetica", 10, "bold")).pack(anchor=tk.W)
-    entree_desc = tk.Entry(cadre, font=("Helvetica", 11), bd=2)
-    entree_desc.pack(fill=tk.X, pady=4)
-
-    tk.Label(cadre, text="Prix Unitaire HT (FCFA) :", bg="#f8fafc", font=("Helvetica", 10, "bold")).pack(anchor=tk.W)
-    entree_prix = tk.Entry(cadre, font=("Helvetica", 11), bd=2)
-    entree_prix.pack(fill=tk.X, pady=4)
-
-    tk.Label(cadre, text="Quantité :", bg="#f8fafc", font=("Helvetica", 10, "bold")).pack(anchor=tk.W)
-# =====================================================================
-# MODULE 4 : app_visuel.py (Version Multi-Postes Pro - PARTIE 7B-1 SUR 7)
-# =====================================================================
-
-    entree_quantite = tk.Entry(cadre, font=("Helvetica", 11), bd=2)
-    entree_quantite.pack(fill=tk.X, pady=4)
-
-    var_tva_directe = tk.BooleanVar(value=True)
-    if SESSION_UTILISATEUR == "gerant":
-        case_tva = tk.Checkbutton(cadre, text="Facturer la TVA (19.25%) sur cette vente", variable=var_tva_directe, bg="#f8fafc", font=("Helvetica", 10, "bold"), fg="#1e3a8a")
-        case_tva.pack(anchor=tk.W, pady=6)
-
+    # 🟢 ASSIGNATION CLAVIER EXCLUSIVE : Enchaînement fluide des cases and ajout au panier par la touche Entrée
     entree_client.bind("<Return>", lambda event: liste_smartphones.focus())
     liste_smartphones.bind("<Return>", lambda event: entree_desc.focus())
     entree_desc.bind("<Return>", lambda event: entree_prix.focus())
     entree_prix.bind("<Return>", lambda event: entree_quantite.focus())
-    entree_quantite.bind("<Return>", lambda event: action_bouton_enregistrer())
+    entree_quantite.bind("<Return>", lambda event: action_ajouter_panier_souris())
 
-    tk.Button(cadre, text="🛒 VALIDER LA VENTE & ÉMETTRE LE PDF", font=("Helvetica", 11, "bold"), bg="#10b981", fg="white", command=action_bouton_enregistrer, pady=10).pack(fill=tk.X, pady=15)
+    # Zone des deux gros boutons d'action d'usine (Sélection exclusive Souris)
+    cadre_boutons_gros = tk.Frame(comptoir, bg="#f8fafc")
+    cadre_boutons_gros.pack(fill=tk.X, padx=15, pady=5)
+    
+    tk.Button(
+        cadre_boutons_gros, 
+        text="➕ AJOUTER À LA FACTURE", 
+        font=("Helvetica", 10, "bold"), 
+        bg="#3b82f6", 
+        fg="white", 
+        command=action_ajouter_panier_souris, 
+        pady=8
+    ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
+    
+    tk.Button(
+        cadre_boutons_gros, 
+        text="🛒 VALIDER LA VENTE GLOBALE", 
+        font=("Helvetica", 10, "bold"), 
+        bg="#10b981", 
+        fg="white", 
+        command=action_cloturer_la_facture_souris, 
+        pady=8
+    ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 0))
 
     tk.Label(comptoir, text="PANNEAU DE CONTROLE SÉCURISÉ", font=("Helvetica", 10, "bold"), bg="#e2e8f0", fg="#1e293b", pady=4).pack(fill=tk.X)
     cadre_menu = tk.Frame(comptoir, bg="#e2e8f0", padx=10, pady=8)
     cadre_menu.pack(fill=tk.X)
 
+
+    # =====================================================================
+    # 🟢 ROUTAGE ÉTANCHE DES PRIVILÈGES DU PANNEAU DE CONTRÔLE BAS
+    # =====================================================================
     if SESSION_UTILISATEUR == "gerant":
         tk.Button(cadre_menu, text="📦 Stocks", bg="#0284c7", fg="white", font=("Helvetica", 9, "bold"), command=ouvrir_panneau_stock).pack(side=tk.LEFT, padx=3)
         tk.Button(cadre_menu, text="📊 Analyse", bg="#7c3aed", fg="white", font=("Helvetica", 9, "bold"), command=ouvrir_panneau_historique).pack(side=tk.LEFT, padx=3)
-        tk.Button(cadre_menu, text="⚙️ Employés", bg="#ea580c", fg="white", font=("Helvetica", 9, "bold"), command=ouvrir_panneau_administration).pack(side=tk.LEFT, padx=3)
+        tk.Button(cadre_menu, text="👥 gestion des employés", bg="#ea580c", fg="white", font=("Helvetica", 9, "bold"), command=ouvrir_panneau_employes).pack(side=tk.LEFT, padx=3)
     else:
-        tk.Button(cadre_menu, text="📊 HISTORIQUE DE VENTES", bg="#f59e0b", fg="white", font=("Helvetica", 9, "bold"), command=ouvrir_historique_caissiere).pack(side=tk.LEFT, padx=5)
-    
+        tk.Button(
+            cadre_menu, 
+            text="📊 HISTORIQUE DE VENTES", 
+            bg="#f59e0b", 
+            fg="white", 
+            font=("Helvetica", 9, "bold"), 
+            command=ouvrir_historique_caissiere
+        ).pack(side=tk.LEFT, padx=5)
+
+# =====================================================================
+# 🟢 COLLER LA FONCTION ICI (ALIGNÉE TOUT À FAIT À GAUCHE DU FICHIER)
+# =====================================================================
     def deconnecter():
+        """Ferme la session active du comptoir et réactive l'écran d'authentification racine."""
         comptoir.destroy()
         FENETRE_PRINCIPALE_LOGIN.deiconify()
         entree_user.delete(0, tk.END)
         entree_password.delete(0, tk.END)
         entree_user.insert(0, "gerant")
         entree_user.focus()
-    
+
+    # Le bouton Quitter qui appelle deconnecter (garder son emplacement actuel d'origine)
     tk.Button(cadre_menu, text="🚪 Quitter", bg="#64748b", fg="white", font=("Helvetica", 9, "bold"), command=deconnecter).pack(side=tk.RIGHT, padx=3)
+    tk.Button(cadre_menu, text="🔑 Modifier mon passe", bg="#CE0707", fg="white", font=("Helvetica", 9, "bold"), command=ouvrir_fenetre_modification_mdp_caissiere).pack(side=tk.LEFT, padx=3)
 
-
+# =====================================================================
+# 🟢 ÉTAPE EXTRA-EXTÉRIEURE : FONCTION PLACÉE TOUT À FAIT À GAUCHE DU FICHIER
+# =====================================================================
 def ouvrir_historique_caissiere():
-    """Fenêtre d'historique personnelle des ventes de la caissière active avec filtrage temporel complet."""
+    """Fenêtre d'historique personnelle des ventes de la caissière active avec affichage initial automatique, scrollbar et double-clic d'audit."""
     caissiere_nom = str(NOM_CAISSIERE_ACTIVE).strip().lower()
 
+    # =====================================================================
+    # 📄 POP-UP DE DOUBLE-CLIC CAISSIÈRE (RE-CALIBRÉE À 100% SANS COUPURE)
+    # =====================================================================
+    def action_double_clic_detail_caissiere(event):
+        """Ouvre une fenêtre d'audit propre en allant chercher la liste complète des marchandises en BD."""
+        selection = arbre_historique.selection()
+        if not selection: return
+        
+        ligne_id = selection[0]
+        valeurs = arbre_historique.item(ligne_id)["values"]
+        
+        num_facture = valeurs[0]
+        client_nom = valeurs[1]
+        net_ttc = valeurs[3]
+        date_v = valeurs[4]
+        caissiere_v = valeurs[5]
+        
+        # Interrogation directe de la BD locale pour extraire le texte d'origine complet (Évite le texte tronqué)
+        try:
+            connexion = sqlite3.connect(data_base.DB_NAME)
+            curseur = connexion.cursor()
+            curseur.execute("SELECT article, description_unique FROM ventes WHERE id = ?", (int(num_facture),))
+            ligne_bd = curseur.fetchone()
+            connexion.close()
+            
+            if ligne_bd:
+                articles_complets_bd = str(ligne_bd[0]).upper()
+                imei_complets_bd = str(ligne_bd[1]).upper()
+            else:
+                articles_complets_bd = str(valeurs[2]).upper()
+                imei_complets_bd = "AUCUNE SPÉCIFICATION TECHNIQUE ACCESSIBLE"
+        except Exception:
+            articles_complets_bd = str(valeurs[2]).upper()
+            imei_complets_bd = "ERREUR DE LECTURE DU REGISTRE LOCAL"
+
+        # Fenêtre pop-up graphique d'audit caissière
+        pop_detail = Toplevel(historique)
+        pop_detail.title(f"📄 Détail Vente Multi-Lignes #{str(num_facture).zfill(4)}")
+        pop_detail.geometry("480x340")
+        pop_detail.configure(bg="#f8fafc")
+        pop_detail.grab_set()
+        
+        tk.Label(pop_detail, text=f"FACTURE #{str(num_facture).zfill(4)} - {client_nom}", font=("Helvetica", 10, "bold"), bg="#1e293b", fg="white", pady=6).pack(fill=tk.X)
+        
+        cadre_corps = tk.Frame(pop_detail, bg="#f8fafc", padx=15, pady=10)
+        cadre_corps.pack(fill=tk.BOTH, expand=True)
+        
+        texte_details = tk.Text(cadre_corps, font=("Helvetica", 10), bg="white", bd=2, wrap=tk.WORD)
+        texte_details.pack(fill=tk.BOTH, expand=True)
+        
+        contenu_affichage = f"📅 DATE DE LA VENTE  : {date_v}\n" \
+                            f"👥 CAISSIÈRE ÉMETTRICE : {caissiere_v}\n" \
+                            f"💳 NET TTC ENCAISSÉ    : {net_ttc}\n" \
+                            f"--------------------------------------------------\n" \
+                            f"📦 MARCHANDISES ACHETÉES :\n{articles_complets_bd.replace(', ', '\n')}\n\n" \
+                            f"🔍 IMEI / SPÉCIFICATIONS TECHNIQUES :\n{imei_complets_bd.replace(' | ', '\n')}"
+                            
+        texte_details.insert(tk.END, contenu_affichage)
+        texte_details.config(state=tk.DISABLED)
+        
+        tk.Button(pop_detail, text="❌ FERMER", bg="#dc2626", fg="white", font=("Helvetica", 9, "bold"), command=pop_detail.destroy).pack(fill=tk.X, pady=5)
+
+    # =====================================================================
+    # 📊 MOTEUR DE RECHARGE DU TIROIR-CAISSE PERSONNEL (AVEC SÉCURITÉ TUPLE)
+    # =====================================================================
+    def rafraichir_historique_caissiere_local(filtrer=False):
+        valeur = entree_cible_historique.get().strip()
+        periode_choisie = select_tempo.get() # "JOUR", "MOIS" ou "ANNEE"
+
+        if filtrer and not valeur:
+            messagebox.showwarning("Critère manquant", "Veuillez saisir une valeur cible pour lancer le filtrage.")
+            return
+
+        # Vidage propre de la grille avant rechargement
+        for item in arbre_historique.get_children(): 
+            arbre_historique.delete(item)
+            
+        ventes = data_base.recuperer_ventes_par_caissiere(caissiere_nom)
+        total_ttc = 0.0
+
+        for index, v in enumerate(ventes, start=1):
+            if isinstance(v, (tuple, list)) and len(v) >= 4:
+                num_id = v[0]
+                client_nom = str(v[1]).upper()
+                articles_bruts = str(v[2]).upper()
+                net_ttc_total = f"{float(v[6]):,} FCFA" if len(v) > 6 else f"{float(v[3]):,} FCFA"
+                
+                # 🟢 EXTRACTION SÉCURISÉE DE LA VRAIE DATE DE VENTE (Format stocké: DD/MM/YYYY)
+                date_facture = str(v[8]).strip() if len(v) > 8 else (str(v[4]).strip() if len(v) > 4 else "")
+                
+                if not date_facture:
+                    continue
+
+                # =====================================================================
+                # 🔍 LE COEUR DU FILTRAGE CHIRURGICAL ET STRICT DEMANDÉ
+                # =====================================================================
+                if filtrer:
+                    garder_ligne = False
+                    
+                    # Cas 1 : JOUR -> On attend un format strict DD/MM/YYYY (ex: 29/09/2026)
+                    if periode_choisie == "JOUR":
+                        if date_facture == valeur:
+                            garder_ligne = True
+                            
+                    # Cas 2 : MOIS -> On attend un format strict MM/YYYY (ex: 09/2026)
+                    elif periode_choisie == "MOIS":
+                        # On vérifie si la date de la facture se termine par le bloc recherché (ex: /09/2026)
+                        valeur_mois_propre = valeur if valeur.startswith("/") else f"/{valeur}"
+                        if date_facture.endswith(valeur_mois_propre):
+                            garder_ligne = True
+                            
+                    # Cas 3 : ANNEE -> On attend un format strict YYYY (ex: 2026)
+                    elif periode_choisie == "ANNEE":
+                        if date_facture.endswith(valeur):
+                            garder_ligne = True
+                    
+                    # Si la ligne ne correspond pas au critère, on passe immédiatement à la suivante
+                    if not garder_ligne:
+                        continue
+
+                # Insertion propre dans le tableau de la caissière
+                articles_visuels = articles_bruts if len(articles_bruts) < 32 else articles_bruts[:30] + "..."
+                arbre_historique.insert("", tk.END, values=(num_id, client_nom, articles_visuels, net_ttc_total, date_facture, caissiere_nom.upper()))
+                
+                try:
+                    prix_extraction = float(v[6]) if len(v) > 6 else float(v[3])
+                    total_ttc += prix_extraction
+                except Exception:
+                    pass
+            else:
+                # Sécurité de secours si la base contient une ancienne ligne plate
+                if filtrer: continue
+                arbre_historique.insert("", tk.END, values=(str(index), "ACHAT UNIQUE", str(v).upper()[:30], "Voir Reçu", "29/09/2026", caissiere_nom.upper()))
+
+        # Mise à jour instantanée du grand bandeau vert des calculs cumulés
+        label_total.config(text=f"MON TOTAL COMPTABLE CUMULÉ : {total_ttc:,} FCFA")
+
+
+    # Interface Graphique de l'historique
     historique = Toplevel(FENETRE_PRINCIPALE_LOGIN)
-    historique.title(f"📊 Historique de {caissiere_nom.upper()}")
+    historique.title(f"📊 Mon Historique Commercial - Session {caissiere_nom.upper()}")
     historique.geometry("750x620")
     historique.configure(bg="#f8fafc")
     historique.grab_set()
@@ -776,56 +1345,39 @@ def ouvrir_historique_caissiere():
     select_tempo = ttk.Combobox(cadre_stat, values=["JOUR", "MOIS", "ANNEE"], width=10, state="readonly")
     select_tempo.grid(row=0, column=1, padx=5); select_tempo.current(0)
 
-    tk.Label(cadre_stat, text="Cible (ex: 31/08/2026) :", bg="#f8fafc").grid(row=0, column=2, padx=5, sticky=tk.W)
+    tk.Label(cadre_stat, text="Cible (ex: 29/09/2026) :", bg="#f8fafc").grid(row=0, column=2, padx=5, sticky=tk.W)
     entree_cible_historique = tk.Entry(cadre_stat, width=15, font=("Helvetica", 10), bd=2)
     entree_cible_historique.grid(row=0, column=3, padx=5)
+    entree_cible_historique.bind("<Return>", lambda event: rafraichir_historique_caissiere_local(filtrer=True))
 
-    def rafraichir_historique_caissiere():
-        valeur = entree_cible_historique.get().strip()
-        if not valeur:
-            messagebox.showwarning("Critère manquant", "Saisissez un critère cible.")
-            return
+    tk.Button(cadre_stat, text="🔍 FILTRER", bg="#1e293b", fg="white", font=("Helvetica", 9, "bold"), command=lambda: rafraichir_historique_caissiere_local(filtrer=True)).grid(row=0, column=4, padx=5)
+    tk.Button(cadre_stat, text="📋 TOUT AFFICHER", bg="#0284c7", fg="white", font=("Helvetica", 9, "bold"), command=lambda: rafraichir_historique_caissiere_local(filtrer=False)).grid(row=0, column=5, padx=5)
 
-        for item in arbre_historique.get_children(): arbre_historique.delete(item)
-        ventes = data_base.recuperer_ventes_par_caissiere(caissiere_nom)
-        total_ttc = 0.0
+    label_total = tk.Label(historique, text="MON TOTAL COMPTABLE CUMULÉ : 0.00 FCFA", font=("Helvetica", 11, "bold"), bg="#d1fae5", fg="#065f46", pady=6)
+    label_total.pack(fill=tk.X, padx=15, pady=2)
 
-        for v in ventes:
-            date_brute = str(v[4]).strip()
-            garder = False
-            
-            if select_tempo.get() == "JOUR":
-                if date_brute == valeur: garder = True
-            elif select_tempo.get() == "MOIS":
-                try:
-                    m_db = date_brute.split("/")
-                    if int(m_db[1]) == int(valeur): garder = True
-                except Exception: pass
-            elif select_tempo.get() == "ANNEE":
-                if date_brute.endswith(valeur): garder = True
+    cadre_arbre = tk.Frame(historique, bg="#f8fafc")
+    cadre_arbre.pack(fill=tk.BOTH, expand=True, padx=15, pady=5)
 
-            if garder:
-                total_ttc += float(v[3])
-                arbre_historique.insert("", tk.END, values=(v[0], v[1], str(v[2]).strip(), f"{v[3]} FCFA", f"{v[4]} à {v[5]}", caissiere_nom.upper()))
-
-        label_total.config(text=f"MON TOTAL COMPTABLE CUMULÉ : {round(total_ttc, 2)} FCFA")
-
-    tk.Button(cadre_stat, text="🔍 FILTRER", bg="#1e293b", fg="white", font=("Helvetica", 9, "bold"), command=rafraichir_historique_caissiere).grid(row=0, column=4, padx=10)
-
-    label_total = tk.Label(cadre_stat, text="MON TOTAL COMPTABLE CUMULÉ : 0.00 FCFA", font=("Helvetica", 11, "bold"), bg="#d1fae5", fg="#065f46", pady=6)
-    label_total.grid(row=1, column=0, columnspan=5, sticky=tk.EW, pady=6)
-
-    arbre_historique = ttk.Treeview(historique, columns=("ID", "Client", "Article", "Total TTC", "Date/Heure", "Caissière"), show="headings", height=12)
+    arbre_historique = ttk.Treeview(cadre_arbre, columns=("ID", "Client", "Article", "Total TTC", "Date/Heure", "Caissière"), show="headings", height=12)
     arbre_historique.heading("ID", text="N°"); arbre_historique.heading("Client", text="CLIENT"); arbre_historique.heading("Article", text="ARTICLE"); arbre_historique.heading("Total TTC", text="NET TTC"); arbre_historique.heading("Date/Heure", text="TEMPOREL"); arbre_historique.heading("Caissière", text="EMETTEUR")
     arbre_historique.column("ID", width=40, anchor=tk.CENTER); arbre_historique.column("Client", width=120, anchor=tk.W); arbre_historique.column("Article", width=180, anchor=tk.W); arbre_historique.column("Total TTC", width=110, anchor=tk.CENTER); arbre_historique.column("Date/Heure", width=140, anchor=tk.CENTER); arbre_historique.column("Caissière", width=100, anchor=tk.CENTER)
-    arbre_historique.pack(fill=tk.BOTH, expand=True, padx=15, pady=10)
+    
+    # 🟢 ANCRAGE INDUSTRIALISÉ DE LA SCROLLBAR LONG TERME
+    scroll_historique = ttk.Scrollbar(cadre_arbre, orient="vertical", command=arbre_historique.yview)
+    arbre_historique.configure(yscrollcommand=scroll_historique.set)
+    arbre_historique.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+    scroll_historique.pack(side=tk.RIGHT, fill=tk.Y)
 
-# =====================================================================
-# MODULE 4 : app_visuel.py (Version Multi-Postes Pro - PARTIE 7B-2 SUR 7)
-# =====================================================================
+    # 🟢 ANCRAGE ÉVÉNEMENT DU DOUBLE-CLIC POUR LE PANNEAU CAISSIÈRE
+    arbre_historique.bind("<Double-1>", action_double_clic_detail_caissiere)
 
+    # Allumage automatique immédiat dès l'ouverture du panneau orange
+    rafraichir_historique_caissiere_local(filtrer=False)
+
+# --- POINT DE DÉMARRAGE DE LA RACINE UNIQUE avec verifier_acces() injectée ---
 def verifier_acces():
-    """Valide la session employé et applique le contrôle de licence Cloud bloquant et inviolable."""
+    """Valide la session employé et gère le mot de passe d'usine serge2026 à chaud."""
     global SESSION_UTILISATEUR, NOM_CAISSIERE_ACTIVE
     user = entree_user.get().strip().lower()
     pwd = entree_password.get().strip()
@@ -835,10 +1387,10 @@ def verifier_acces():
         return
 
     try:
-        # Allumage préventif des structures locales SQLite
+        # Allumage préventif des structures locales
         data_base.initialisation_systeme()
 
-        # Lecture immédiate en base de données locale pour vérifier l'état
+        # Lecture immédiate en base de données pour vérifier l'état d'avancement
         connexion = sqlite3.connect(data_base.DB_NAME)
         curseur = connexion.cursor()
         curseur.execute("SELECT mot_de_passe FROM employes WHERE identifiant = 'gerant'")
@@ -851,20 +1403,20 @@ def verifier_acces():
         mot_de_passe_actuel_db = ligne_pwd[0] if ligne_pwd else "serge2026"
         boutique_installee = ligne_boutique is not None
 
-        # 🟢 CORRECTION CONSTRUCTEUR : Si le nom de la boutique n'est pas dans la base locale, 
-        # on force l'ouverture de l'assistant, même si le Cloud est actif !
-        if not boutique_installee:
+        # 🟢 CAS 1 : Premier démarrage de l'histoire du logiciel (Le gérant doit taper serge2026)
+        if not boutique_installee and mot_de_passe_actuel_db == "serge2026":
             if user == "gerant" and pwd == "serge2026":
                 nom_magasin = simpledialog.askstring("Configuration Boutique - Étape 1/2", "Bienvenue chez KashKeeper !\n\nVeuillez entrer le NOM OFFICIEL de votre entreprise :")
                 if not nom_magasin or not nom_magasin.strip():
-                    messagebox.showwarning("Incomplet", "Le nom de l'entreprise est exigé.")
+                    messagebox.showwarning("Incomplet", "un nom est exiger pour l'entreprise ou la boutique")
                     return
 
                 creer_code = simpledialog.askstring("Configuration Boutique - Étape 2/2", "Veuillez définir votre MOT DE PASSE personnalisé définitif :")
                 if not creer_code or len(creer_code.strip()) < 6 or creer_code.strip() == "serge2026":
-                    messagebox.showerror("Erreur", "Le mot de passe exige un minimum de 6 caractères et doit être différent de 'serge2026'.")
+                    messagebox.showerror("Erreur", "Le mot de passe exige un minimum de 6 caractères.")
                     return
 
+                # Écrasement définitif des paramètres d'usine par défaut
                 data_base.enregistrer_nom_boutique_sql(nom_magasin.strip())
                 data_base.configurer_compte_gerant_sql(creer_code.strip())
                 
@@ -873,44 +1425,16 @@ def verifier_acces():
                 entree_password.focus()
                 return
             else:
-                # 🛑 SÉCURITÉ : Si la base locale vient d'être supprimée, on explique au gérant d'utiliser le code d'usine pour réinitialiser
-                if pwd != "serge2026":
-                    messagebox.showerror("Nouvelle Installation", "Base de données locale introuvable.\n\nConnectez-vous avec  le mot de passe d'usine pour reconfigurer votre espace.")
-                    return
+                messagebox.showerror("Accès Refusé", "Code d'initialisation d'usine incorrect.\n\nVeuillez entrer le mot de passe de sécurité par défaut.")
+                return
 
-        # 🛑 PROTECTION : Ce bloc ne s'active désormais QUE si la boutique est déjà configurée localement
-        if boutique_installee and pwd == "serge2026" and mot_de_passe_actuel_db != "serge2026":
+        # 🛑 PROTECTION REPARÉE : Si le mot de passe n'est plus serge2026, l'accès avec ce code est banni
+        if pwd == "serge2026" and mot_de_passe_actuel_db != "serge2026":
             messagebox.showerror("Accès Refusé", "Ce mot de passe d'usine a expiré après la configuration initiale.")
             return
 
-        # 🟢 CONTRÔLE INTERCONNEXION SAAS (Vérification de la licence sur Render)
+        # 🟢 CAS 2 : Utilisation quotidienne classique
         if data_base.verifier_identifiants_sql(user, pwd):
-            try:
-                reponse_licence = requests.get(
-                    f"{URL_API_KASHFLOW}/licence/statut", 
-                    headers={"X-API-Key": CLE_API_KASHFLOW}, 
-                    timeout=5
-                )
-                
-                if reponse_licence.status_code == 200:
-                    infos = reponse_licence.json()
-                    statut_serveur = infos.get("statut", "actif")
-                    jours_restants = infos.get("jours_restants", 0)
-
-                    # 🛑 CAS 1 : BLOCAGE DE SÉCURITÉ STRICT
-                    if statut_serveur == "expire":
-                        messagebox.showerror("Abonnement Expiré", "🚨 COMPTOIR VERROUILLÉ !\n\nVotre période d'abonnement et de tolérance est terminée.\nVeuillez régulariser en cliquant sur 'PAYER ABONNEMENT' en bas à droite.")
-                        return # On arrête TOUT ici, le code ne descend pas !
-                    
-                    # 🔶 CAS 2 : PÉRIODE DE GRÂCE (Tolérance de 3 jours)
-                    elif statut_serveur == "grace":
-                        messagebox.showwarning("Avertissement de Tolérance", f"⚠️ ALERTE FINANCIÈRE :\n\nVotre abonnement est expiré. Mode tolérance activé pour {jours_restants} jour(s).\nVeuillez recharger pour éviter la coupure automatique.")
-
-            except Exception as e:
-                # Tolérance hors-ligne si panne de réseau internet temporaire
-                logging.warning("Vérification licence différée (mode hors-ligne) : %s", e)
-
-            # 🟢 SEULEMENT SI TOUT EST OK : On autorise enfin l'accès au comptoir
             SESSION_UTILISATEUR = str(user).strip().lower()
             NOM_CAISSIERE_ACTIVE = str(user).strip().lower()
             messagebox.showinfo("Accès Autorisé", f"Bienvenue {SESSION_UTILISATEUR.upper()} !")
@@ -918,10 +1442,8 @@ def verifier_acces():
             ouvrir_comptoir_facturation()
         else:
             messagebox.showerror("Accès Refusé", "Identifiant ou mot de passe incorrect.")
-            
     except Exception as e:
         messagebox.showerror("Erreur", f"Erreur système : {str(e)}")
-
 
 
 def recuperer_mot_de_passe_oublie():
@@ -938,7 +1460,7 @@ def recuperer_mot_de_passe_oublie():
             messagebox.showwarning("Action Impossible", "Veuillez d'abord vous connecter normalement avec le code d'usine pour configurer la boutique.")
             return
 
-        cle_saisie = simpledialog.askstring("Sécurité Constructeur", "Veuillez entrer la clé de secours fournie par l'ingénieur Serge :")
+        cle_saisie = simpledialog.askstring("Sécurité Constructeur", "Veuillez entrer la clé de secours fournie par l'ingénieur Serges :")
         if cle_saisie == CLE_MASTER_SERGE:
             nouveau_code = simpledialog.askstring("Réinitialisation", "Clé correcte !\nTapez votre nouveau mot de passe gérant :")
             if nouveau_code and nouveau_code.strip():
@@ -988,109 +1510,12 @@ def action_telecharger_mise_a_jour():
         messagebox.showerror("Échec réseau", f"Impossible de joindre le serveur Cloud pour la mise à jour :\n{e}")
 
 
-def ouvrir_fenetre_paiement():
-    """Fenêtre de renouvellement de l'abonnement par Mobile Money ou Carte Bancaire Internationale."""
-    def action_declencher_prelevement():
-        num_momo = entree_numero_momo.get().strip()
-        
-        if mode_paiement.get() == "MOMO":
-            if not num_momo or len(num_momo) < 9:
-                messagebox.showwarning("Numéro invalide", "Veuillez entrer un numéro de téléphone valide à 9 chiffres.")
-                return
-        else:
-            num_momo = "CARTE_BANCAIRE"
-
-        btn_payer.config(text="🔄 APPEL RÉSEAU EN COURS...", state=tk.DISABLED, bg="#475569")
-        fenetre_paye.update_idletasks()
-
-        try:
-            reponse = requests.post(
-                f"{URL_API_KASHFLOW}/licence/collecter-momo",
-                json={"numero": num_momo},
-                headers={"X-API-Key": CLE_API_KASHFLOW},
-                timeout=12
-            )
-            
-            if reponse.status_code == 200:
-                donnees = reponse.json()
-                
-                # 🟢 INTERCEPTATION CARTE : Si le serveur a renvoyé un lien web, on lance le navigateur !
-                if donnees.get("statut") == "SUCCESS_CARD":
-                    lien_securise = donnees.get("lien_web")
-                    messagebox.showinfo(
-                        "Paiement par Carte", 
-                        "💳 REDIRECTION SÉCURISÉ VALIDE !\n\nVotre navigateur internet va s'ouvrir sur la page de paiement officielle Mastercard/Visa.\n\nTapez vos coordonnées bancaires en toute sécurité sur cette page."
-                    )
-                    # Commande magique qui ouvre automatiquement Google Chrome / Edge sur la page CamPay
-                    webbrowser.open(lien_securise)
-                else:
-                    messagebox.showinfo("Paiement Initié", f"📱 {donnees.get('message')}")
-                fenetre_paye.destroy()
-
-            else:
-                try: erreur_msg = reponse.json().get("detail", "Refus de la passerelle.")
-                except Exception: erreur_msg = "Erreur de communication avec le serveur."
-                messagebox.showerror("Échec", f"🔴 {erreur_msg}")
-                btn_payer.config(text="📲 DEMANDER LE RETRAIT", state=tk.NORMAL, bg="#10b981")
-        except Exception as e:
-            messagebox.showerror("Erreur Système", f"Impossible de joindre le serveur Cloud Render :\n{e}")
-            btn_payer.config(text="📲 DEMANDER LE RETRAIT", state=tk.NORMAL, bg="#10b981")
-
-    def toggle_champs_paiement():
-        if mode_paiement.get() == "MOMO":
-            cadre_input.pack(fill=tk.X, pady=(10, 10), before=btn_payer)
-        else:
-            cadre_input.pack_forget()
-
-    fenetre_paye = Toplevel(FENETRE_PRINCIPALE_LOGIN)
-    fenetre_paye.title("💳 Renouvellement de l'Abonnement")
-    fenetre_paye.geometry("440x420")
-    fenetre_paye.configure(bg="#1e293b")
-    fenetre_paye.resizable(False, False)
-    fenetre_paye.grab_set()
-
-    tk.Label(fenetre_paye, text="RENOUVELLEMENT DE L'ABONNEMENT", font=("Segoe UI", 11, "bold"), bg="#1e293b", fg="#f59e0b").pack(pady=(18, 5))
-    
-    cadre_choix = tk.Frame(fenetre_paye, bg="#1e293b")
-    cadre_choix.pack(pady=10)
-    mode_paiement = tk.StringVar(value="MOMO")
-    
-    tk.Radiobutton(cadre_choix, text="📱 Mobile Money", variable=mode_paiement, value="MOMO", bg="#1e293b", fg="white", selectcolor="#1e293b", font=("Segoe UI", 9, "bold"), command=toggle_champs_paiement).pack(side=tk.LEFT, padx=15)
-    tk.Radiobutton(cadre_choix, text="💳 Carte Bancaire (Visa/Mc)", variable=mode_paiement, value="CARD", bg="#1e293b", fg="white", selectcolor="#1e293b", font=("Segoe UI", 9, "bold"), command=toggle_champs_paiement).pack(side=tk.LEFT, padx=15)
-
-    cadre_texte = tk.Frame(fenetre_paye, bg="#1e293b", padx=20)
-    cadre_texte.pack(fill=tk.X)
-
-    texte_instructions = (
-        "Sélectionnez votre mode de règlement préféré.\n"
-        "Pour le Mobile Money, un pop-up USSD surgira sur votre écran.\n"
-        "Pour la Carte Bancaire, une facturation sécurisée Visa/Mastercard sera initiée.\n\n"
-        "Tarif mensuel : 14 000 FCFA"
-    )
-    tk.Label(cadre_texte, text=texte_instructions, font=("Segoe UI", 10), bg="#1e293b", fg="#cbd5e1", justify=tk.LEFT, wraplength=390).pack(anchor=tk.W, pady=5)
-    
-    cadre_input = tk.Frame(fenetre_paye, bg="#1e293b", padx=20)
-    cadre_input.pack(fill=tk.X, pady=(10, 10))
-    tk.Label(cadre_input, text="Numéro Mobile Money (Cameroun) :", font=("Segoe UI", 9, "bold"), bg="#1e293b", fg="#94a3b8").pack(anchor=tk.W, pady=(0, 4))
-    
-    entree_numero_momo = tk.Entry(cadre_input, font=("Segoe UI", 13, "bold"), bd=0, bg="white", fg="#1e293b", justify=tk.CENTER, relief=tk.FLAT)
-    entree_numero_momo.pack(fill=tk.X, ipady=6)
-    entree_numero_momo.insert(0, "6")
-
-    btn_payer = tk.Button(fenetre_paye, text="🚀  DEMANDER LE RETRAIT SÉCURISÉ", bg="#10b981", fg="white", font=("Segoe UI", 10, "bold"), bd=0, cursor="hand2", command=action_declencher_prelevement, pady=8)
-    btn_payer.pack(fill=tk.X, padx=20, pady=(15, 5))
-    
-    tk.Button(fenetre_paye, text="ANNULER", bg="#1e293b", fg="#94a3b8", font=("Segoe UI", 9, "bold", "underline"), bd=0, cursor="hand2", command=fenetre_paye.destroy).pack(pady=5)
-
-
-
-
 # --- POINT DE DÉMARRAGE DE LA RACINE UNIQUE ---
 login = tk.Tk()
 FENETRE_PRINCIPALE_LOGIN = login
 
 login.title("Sécurité d'Accès")
-login.geometry("350x460") 
+login.geometry("350x460") # Augmenté de 420 à 460 pour offrir une marge d'espace au nouveau bouton
 login.configure(bg="#1e293b")
 
 tk.Label(login, text="CONNEXION SÉCURISÉE", font=("Helvetica", 12, "bold"), bg="#1e293b", fg="white").pack(pady=20)
@@ -1114,29 +1539,74 @@ entree_password.pack(fill=tk.X, pady=5)
 entree_user.bind("<Return>", lambda event: entree_password.focus())
 entree_password.bind("<Return>", lambda event: verifier_acces())
 
-# 1. Bouton d'accès principal
-tk.Button(login, text="🔓 ACCÉDER AU COMPTOIR", font=("Helvetica", 11, "bold"), bg="#3b82f6", fg="white", command=verifier_acces).pack(fill=tk.X, padx=30, pady=12)
+# 1. Bouton d'accès principal au comptoir
+tk.Button(
+    login, 
+    text="🔓 ACCÉDER AU COMPTOIR", 
+    font=("Helvetica", 11, "bold"), 
+    bg="#3b82f6", 
+    fg="white", 
+    command=verifier_acces
+).pack(fill=tk.X, padx=30, pady=12)
 
-# 2. Bouton de mise à jour
-tk.Button(login, text="🔄 VÉRIFIER LES MISES À JOUR", font=("Helvetica", 10, "bold"), bg="#475569", fg="white", command=action_telecharger_mise_a_jour).pack(fill=tk.X, padx=30, pady=5)
+# 2. 🟢 INTERCONNEXION SAAS : Bouton de mise à jour à distance ancré sur la page de connexion
+tk.Button(
+    login, 
+    text="🔄 VÉRIFIER LES MISES À JOUR", 
+    font=("Helvetica", 10, "bold"), 
+    bg="#475569", 
+    fg="white", 
+    command=action_telecharger_mise_a_jour
+).pack(fill=tk.X, padx=30, pady=5)
 
 # 3. Bouton mot de passe oublié
-tk.Button(login, text="❓ Mot de passe oublié / Réinitialiser", font=("Helvetica", 9, "underline"), bg="#1e293b", fg="#94a3b8", bd=0, command=recuperer_mot_de_passe_oublie, cursor="hand2").pack(pady=5)
-
-# 🚀 ANCRAGE EXTRÊME INFERIEUR DROIT DU BOUTON ABONNEMENT MENSUEL
-cadre_bas = tk.Frame(login, bg="#1e293b")
-cadre_bas.pack(fill=tk.X, side=tk.BOTTOM, padx=15, pady=10)
-
-btn_abonnement = tk.Button(
-    cadre_bas, 
-    text="💳 PAYER ABONNEMENT", 
-    font=("Helvetica", 8, "bold", "underline"), 
+tk.Button(
+    login, 
+    text="❓ Mot de passe oublié / Réinitialiser", 
+    font=("Helvetica", 9, "underline"), 
     bg="#1e293b", 
-    fg="#f59e0b", 
+    fg="#94a3b8", 
     bd=0, 
-    cursor="hand2",
-    command=ouvrir_fenetre_paiement
-)
-btn_abonnement.pack(side=tk.RIGHT)
+    command=recuperer_mot_de_passe_oublie, 
+    cursor="hand2"
+).pack(pady=10)
+def ouvrir_fenetre_modification_mdp_caissiere():
+    """Ouvre une interface sécurisée permettant à la caissière connectée de changer son mot de passe."""
+    caissiere_active = str(NOM_CAISSIERE_ACTIVE).strip().lower()
+    
+    """if caissiere_active == "gerant":
+        messagebox.showinfo("RH", "Le gérant utilise la clé de secours master ou le panneau RH dédié.")
+        return"""
+
+    # Demande de l'ancien mot de passe pour vérification de sécurité
+    ancien_pwd = simpledialog.askstring("Sécurité", "Entrez votre mot de passe ACTUEL :", show="*")
+    if not ancien_pwd: return
+
+    # Vérification stricte dans la base de données locale
+    if not data_base.verifier_identifiants_sql(caissiere_active, ancien_pwd.strip()):
+        messagebox.showerror("Authentification échouée", "Mot de passe actuel incorrect. Modification annulée.")
+        return
+
+    # Saisie du nouveau mot de passe
+    nouveau_pwd = simpledialog.askstring("Nouveau code", "Entrez votre NOUVEAU mot de passe (min 4 caractères) :", show="*")
+    if not nouveau_pwd or len(nouveau_pwd.strip()) < 4:
+        messagebox.showerror("Erreur", "Le mot de passe doit comporter au moins 4 caractères.")
+        return
+
+    confirmation_pwd = simpledialog.askstring("Confirmation", "Confirmez votre nouveau mot de passe :", show="*")
+    if nouveau_pwd.strip() != confirmation_pwd.strip():
+        messagebox.showerror("Erreur", "Les deux mots de passe ne correspondent pas.")
+        return
+
+    # Gravure immédiate du nouveau mot de passe en base de données local
+    try:
+        connexion = sqlite3.connect(data_base.DB_NAME)
+        curseur = connexion.cursor()
+        curseur.execute("UPDATE employes SET mot_de_passe = ? WHERE identifiant = ?", (nouveau_pwd.strip(), caissiere_active))
+        connexion.commit()
+        connexion.close()
+        messagebox.showinfo("Succès", "✨ Votre mot de passe secret a été modifié avec succès ! Utilisez-le à votre prochaine connexion.")
+    except Exception as e:
+        messagebox.showerror("Erreur système", f"Impossible de modifier le mot de passe : {e}")
 
 login.mainloop()

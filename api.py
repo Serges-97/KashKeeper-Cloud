@@ -1,18 +1,17 @@
 # =====================================================================
-# ENGINE CLOUD KASHFLOW - MODULE 3 : api.py (Version Multi-Postes Pro - 1 SUR 2)
+# ENGINE CLOUD KASHFLOW - MODULE 3 : api.py (Version Multi-Postes Pro - ÉTAPE 1 SUR 10)
 # =====================================================================
 import sqlite3
 import os
 import secrets
 import sys
 import json
+import requests
+from datetime import datetime, timedelta
+from pydantic import BaseModel
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
-import requests
-from datetime import datetime, timedelta
-from fastapi import Header, HTTPException, Depends
 
 # 🔑 SÉCURITÉ CONSTRUCTEUR : Forcer Render à cibler le bon dossier physique
 DOSSIER_DU_FICHIER = os.path.dirname(os.path.abspath(__file__))
@@ -21,14 +20,16 @@ if DOSSIER_DU_FICHIER not in sys.path:
 
 import data_base
 
-# Initialisation des structures de données centrales au démarrage
+# Initialisation des structures de données centrales locales/cloud au démarrage
 data_base.initialisation_systeme()
 
 app = FastAPI(
-    title="KashFlow Multi-Postes Cloud Engine v5.5",
-    description="Moteur réseau centralisé pour l'interconnexion en temps réel des caisses du magasin."
+    title="KashFlow Multi-Postes Cloud Engine v6.0",
+    description="Moteur réseau centralisé pour l'interconnexion en temps réel des caisses et la gestion des abonnements."
 )
-
+# =====================================================================
+# ENGINE CLOUD KASHFLOW - MODULE 3 : api.py (Version Multi-Postes Pro - ÉTAPE 2 SUR 10)
+# =====================================================================
 # Configuration de la sécurité réseau CORS pour toutes les caisses clientes
 origines_autorisees = [
     origine.strip()
@@ -43,8 +44,30 @@ app.add_middleware(
     allow_headers=["X-API-Key", "Content-Type"],
 )
 
-# --- SCHÉMAS RESEAU PYDANTIC COMMERCIAUX ---
+def verifier_cle_api(x_api_key: str | None = Header(default=None)):
+    """Vérifie la clé d'accès de la boutique avant d'autoriser les échanges de caisse."""
+    cle_attendue = str(os.environ.get("KASHFLOW_API_KEY", "")).strip()
+    if not cle_attendue:
+        return  
+    if not x_api_key or not secrets.compare_digest(x_api_key, cle_attendue):
+        raise HTTPException(status_code=401, detail="Clé API boutique invalide.")
+
+@app.get("/")
+def route_allumage_usine():
+    """Adresse racine épurée. Indique que le réseau cloud de Serge est fonctionnel."""
+    return JSONResponse(
+        status_code=200,
+        content={
+            "statut": "Opérationnel",
+            "moteur": "KashFlow Multi-Postes Engine v6.0",
+            "message": "Le serveur Cloud est prêt. Liaison caisses locales active."
+        }
+    )
+# =====================================================================
+# ENGINE CLOUD KASHFLOW - MODULE 3 : api.py (Version Multi-Postes Pro - ÉTAPE 3 SUR 10)
+# =====================================================================
 class VenteSchemaReseau(BaseModel):
+    """Modèle de réception des ventes supportant l'alignement multi-articles."""
     reference_locale: str
     client: str
     article: str
@@ -55,36 +78,13 @@ class VenteSchemaReseau(BaseModel):
     applique_tva_vente: int | None = None
 
 class StockSchemaReseau(BaseModel):
-    """Modèle réseau exclusif gérant pour injecter et propager les approvisionnements."""
+    """Modèle réseau exclusif gérant pour injecter et propager les approvisionnements avec prix d'achat."""
     modele: str
     quantite_dispo: int
-    prix_achat: float | None = 0.0 # 🟢 Nouveau champ de coût de revient
-
-
-def verifier_cle_api(x_api_key: str | None = Header(default=None)):
-    """Vérifie la clé d'accès de la boutique avant d'autoriser les échanges de caisse."""
-    cle_attendue = str(os.environ.get("KASHFLOW_API_KEY", "")).strip()
-    if not cle_attendue:
-        return  
-    if not x_api_key or not secrets.compare_digest(x_api_key, cle_attendue):
-        raise HTTPException(status_code=401, detail="Clé API boutique invalide.")
-
-
-@app.get("/")
-def route_allumage_usine():
-    """Adresse racine épurée de l'ancien code téléphone. Indique que le réseau est fonctionnel."""
-    return JSONResponse(
-        status_code=200,
-        content={
-            "statut": "Opérationnel",
-            "moteur": "KashFlow Multi-Postes Engine v5.5",
-            "message": "Le serveur Cloud est prêt. Liaison caisses locales active."
-        }
-    )
+    prix_achat: float | None = 0.0
 # =====================================================================
-# ENGINE CLOUD KASHFLOW - MODULE 3 : api.py (Version Multi-Postes Pro - 2 SUR 2)
+# ENGINE CLOUD KASHFLOW - MODULE 3 : api.py (Version Multi-Postes Pro - ÉTAPE 4 SUR 10)
 # =====================================================================
-
 @app.post("/ventes/synchroniser", dependencies=[Depends(verifier_cle_api)])
 def api_centraliser_vente(donnees: VenteSchemaReseau):
     """Centralise et traite informatiquement les transactions transmises par les caisses."""
@@ -113,15 +113,18 @@ def api_centraliser_vente(donnees: VenteSchemaReseau):
             tva=tva_calculee, 
             ttc=total_ttc, 
             caissiere=donnees.caissiere, 
-            reference_locale=donnees.reference_locale
+            reference_locale=donnees.reference_locale,
+            quantite=donnees.quantite
         )
         return {"statut": "Synchronisé", "facture_id_cloud": num_facture}
     except Exception as e: 
         raise HTTPException(status_code=500, detail=str(e))
-
-
+# =====================================================================
+# ENGINE CLOUD KASHFLOW - MODULE 3 : api.py (Version Multi-Postes Pro - ÉTAPE 5 SUR 10)
+# =====================================================================
 @app.post("/stocks/mettre_a_jour", dependencies=[Depends(verifier_cle_api)])
 def api_mettre_a_jour_stock_central(stock: StockSchemaReseau):
+    """Reçoit la mise à jour des stocks du gérant et la grave avec le prix d'achat."""
     try:
         modele_propre = stock.modele.strip().lower()
         if stock.quantite_dispo <= 0:
@@ -131,20 +134,15 @@ def api_mettre_a_jour_stock_central(stock: StockSchemaReseau):
             connexion.close()
             return {"statut": "Succès", "message": f"Article '{modele_propre}' supprimé."}
             
-        # 🟢 On propage le stock avec son prix d'achat sur le cloud gérant
         p_achat = stock.prix_achat if stock.prix_achat is not None else 0.0
         data_base.forcer_mise_a_jour_stock_local_avec_prix(modele_propre, stock.quantite_dispo, p_achat)
         return {"statut": "Succès", "message": f"Stock et prix de '{modele_propre}' synchronisés."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @app.get("/stocks/etat", dependencies=[Depends(verifier_cle_api)])
 def api_consulter_stocks_cloud():
-    """
-    📡 DIFFUSEUR INTERCONNEXION MULTI-POSTES :
-    Renvoie l'inventaire en temps réel à l'ensemble des postes de caisse employés.
-    """
+    """Diffuse l'état des stocks à l'ensemble des caisses connectées avec seuil d'alerte."""
     try:
         lignes = data_base.obtenir_tous_les_stocks_locaux()
         
@@ -155,7 +153,7 @@ def api_consulter_stocks_cloud():
 
         rapport_stock = []
         for l in lignes:
-            modele, quantite, ventes_cumulees = l
+            id_db, modele, quantite, ventes_cumulees = l
             seuil = 10 if ventes_cumulees == max_v else 5
             etat_alerte = "🚨 RUPTURE PROCHE" if quantite <= seuil else "🟢 Stock Confortable"
             
@@ -169,25 +167,27 @@ def api_consulter_stocks_cloud():
         return {"inventaire_magasin": rapport_stock}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-
+# =====================================================================
+# ENGINE CLOUD KASHFLOW - MODULE 3 : api.py (Version Multi-Postes Pro - ÉTAPE 6 SUR 10)
+# =====================================================================
 @app.get("/ventes/statistiques", dependencies=[Depends(verifier_cle_api)])
 def api_obtenir_statistiques(temporalite: str, cible: str):
-    """Extrait l'analyse du chiffre d'affaires du Cloud pour la console gérant."""
+    """Analyse les performances financières et le produit phare pour le gérant."""
     try:
         analyse = data_base.extraire_statistiques_avancees(temporalite, cible)
+        calcul_gains = data_base.extraire_benefice_net_periode(temporalite, cible)
         return {
-            "chiffre_affaires_ttc": f"{analyse['ca_total']:,} FCFA",
+            "chiffre_affaires_ttc": f"{calcul_gains['ca_total']:,} FCFA",
+            "benefice_net_reel": f"{calcul_gains['benefice_net']:,} FCFA",
             "article_le_plus_vendu": str(analyse["produit_phare"]),
             "comparatif_performance_n_1": analyse["message_performance"],
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @app.get("/ventes/caissiere/{nom_caissiere}", dependencies=[Depends(verifier_cle_api)])
 def api_historique_caissiere(nom_caissiere: str):
-    """Renvoie les factures d'un agent pour contrôle financier inter-machines."""
+    """Permet le contrôle et l'interconnexion de l'historique des caisses."""
     try:
         nom_caissiere = nom_caissiere.strip().lower()
         ventes = data_base.recuperer_ventes_par_caissiere(nom_caissiere)
@@ -204,95 +204,50 @@ def api_historique_caissiere(nom_caissiere: str):
                 "date": v[4],
                 "heure": v[5],
             })
-        return {
-            "total_ventes_effectuees": len(liste_formatee),
-            "liste_ventes": list(liste_formatee),
-        }
+        return {"total_ventes_effectuees": len(liste_formatee), "liste_ventes": list(liste_formatee)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @app.get("/employes/liste", dependencies=[Depends(verifier_cle_api)])
 def api_liste_des_employes():
-    """Extrait la liste textuelle propre du personnel du magasin."""
+    """Extrait la liste propre du personnel actif du magasin."""
     try:
         liste_employes = data_base.recuperer_liste_tous_employes()
         return {"employes": [str(emp).strip().lower() for emp in liste_employes]}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-
-
-
+# =====================================================================
+# ENGINE CLOUD KASHFLOW - MODULE 3 : api.py (Version Multi-Postes Pro - ÉTAPE 7 SUR 10)
+# =====================================================================
 @app.get("/systeme/mise-a-jour", dependencies=[Depends(verifier_cle_api)])
 def api_distribuer_mise_a_jour():
-    """
-    📡 DISTRIBUTEUR DE CODE SOURCE :
-    Permet aux applications de caisse de télécharger à distance la dernière version de app_visuel.py.
-    """
+    """Permet aux applications de caisse clientes de télécharger à distance la dernière version de app_visuel.py."""
     try:
         chemin_visuel = os.path.join(DOSSIER_DU_FICHIER, "app_visuel.py")
         if not os.path.exists(chemin_visuel):
             raise HTTPException(status_code=404, detail="Fichier de mise à jour introuvable sur le serveur.")
             
-        # On lit le fichier de l'interface graphique en texte pur pour l'envoyer par le réseau
         with open(chemin_visuel, "r", encoding="utf-8") as f:
             code_source = f.read()
             
         return {
             "statut": "Succès",
-            "version_cloud": "5.6",  # Tu pourras augmenter ce numéro quand tu feras des modifs
+            "version_cloud": "6.0",
             "code": code_source
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 # =====================================================================
-# ENGINE CLOUD KASHKEEPER - MODULE PASSERELLE DE PAIEMENT AUTOMATIQUE
+# ENGINE CLOUD KASHFLOW - MODULE 3 : api.py (Version Multi-Postes Pro - ÉTAPE 8 SUR 10)
 # =====================================================================
-
-# 🟢 CONFIGURATION DE TES CLÉS CLOUD (Conservées à l'identique)
-CAMPAY_USERNAME = os.getenv("CAMPAY_USERNAME", "fuA8YJK5y7w_iZPCKSWAVxWfGUGDRqLIeBdRt5zU-y6vzEAM9HC69h5p47A-ZboUUl6uyp55nhelsGIkU6fTpQ")
-CAMPAY_PASSWORD = os.getenv("CAMPAY_PASSWORD", "Azmz4whioMs_GSVjHQvgApuu5S5-dKmz6_JSKZ66KKmyLoXmsIT4wQMuir78FGcz0UcP9RZgPQGMRAoNR0W_FA")
-
-# 🟢 FIXATION CONSTRUCTEUR : Redirection stricte sur l'API Démo de la Sandbox
-CAMPAY_BASE_URL = "https://campay.net"
-
-# Dictionnaire de suivi des licences (Clé API de la boutique -> Date de fin)
-BASE_LICENCES_CLOUD = {
-    "SERGE_TECH_998877": "01/01/2026"
-}
-
-def obtenir_token_authentification_campay():
-    """Demande un jeton d'accès temporaire (Token) à l'API Campay."""
-    url = f"{CAMPAY_BASE_URL}/token/"
-    payload = {
-        "username": CAMPAY_USERNAME,
-        "password": CAMPAY_PASSWORD
-    }
-    try:
-        reponse = requests.post(url, json=payload, timeout=8)
-        if reponse.status_code == 200:
-            return reponse.json().get("token")
-        return None
-    except Exception:
-        return None
-
-# =====================================================================
-# ENGINE CLOUD KASHKEEPER - PASSAGE EN MODE RÉEL FINANCIER (LIVE)
-# =====================================================================
-import os
-import requests
-from datetime import datetime, timedelta
-from fastapi import Header, HTTPException, Depends
-
 # Lecture sécurisée des clés réelles depuis ton tableau de bord Render Settings
 CAMPAY_USERNAME = os.getenv("CAMPAY_USERNAME")
 CAMPAY_PASSWORD = os.getenv("CAMPAY_PASSWORD")
 
-# 🟢 CONFIGURATION PRODUCTION : On cible le vrai serveur financier de Campay
+# ADRESSE FINANCIÈRE DE PRODUCTION RÉELLE
 CAMPAY_BASE_URL = "https://campay.net"
 
-# Base de données centrale des licences stockée sur le serveur
+# Base de données centrale des licences stockée en mémoire volatile
 BASE_LICENCES_CLOUD = {}
 
 def obtenir_token_authentification_campay():
@@ -309,15 +264,15 @@ def obtenir_token_authentification_campay():
         return None
     except Exception:
         return None
-
-
+# =====================================================================
+# ENGINE CLOUD KASHFLOW - MODULE 3 : api.py (Version Multi-Postes Pro - ÉTAPE 9 SUR 10)
+# =====================================================================
 @app.get("/licence/statut", dependencies=[Depends(verifier_cle_api)])
 def api_verifier_licence_magasin(x_api_key: str = Header(...)):
     """🛡️ LOGIQUE SÉCURITÉ PRODUCTION : Calcule l'abonnement et la grâce de 3 jours."""
     cle_propre = x_api_key.strip()
     date_fin_texte = BASE_LICENCES_CLOUD.get(cle_propre)
     
-    # Si la boutique vient d'acheter l'application, on lui offre ses 30 premiers jours
     if not date_fin_texte:
         date_initiale = (datetime.now() + timedelta(days=30)).strftime("%d/%m/%Y")
         BASE_LICENCES_CLOUD[cle_propre] = date_initiale
@@ -335,111 +290,66 @@ def api_verifier_licence_magasin(x_api_key: str = Header(...)):
             return {"statut": "expire", "jours_restants": 0}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-
+# =====================================================================
+# ENGINE CLOUD KASHFLOW - MODULE 3 : api.py (Version Multi-Postes Pro - ÉTAPE 10 SUR 10)
+# =====================================================================
 @app.post("/licence/collecter-momo", dependencies=[Depends(verifier_cle_api)])
 def api_declencher_collecte_momo(payload: dict, x_api_key: str = Header(...)):
-    """
-    📲 COLLECTEUR USSD EN DIRECT :
-    Déclenche le VRAI pop-up de retrait de 14 000 FCFA sur le téléphone du gérant.
-    """
+    """Déclenche le prélèvement MoMo ou génère le lien de paiement pour Carte Visa/Mastercard."""
     cle_boutique = x_api_key.strip()
     numero_telephone = payload.get("numero", "").strip()
     
-    # Si c'est l'option Carte Bancaire internationale, on s'adapte
-        # 🟢 MODIFICATION CONSTRUCTEUR : Génération et renvoi du vrai lien de paiement Visa/Mastercard
+    # 🟢 INTERCEPTATION BANCAIRE INTERNATIONALE
     if numero_telephone == "CARTE_BANCAIRE":
         token_campay = obtenir_token_authentification_campay()
-        if not token_campay:
-            raise HTTPException(status_code=500, detail="Erreur d'authentification passerelle.")
+        if not token_campay: raise HTTPException(status_code=500, detail="Erreur token.")
             
-        # Appel à la route de facturation web de CamPay (Collect Web Link)
         url_lien = f"{CAMPAY_BASE_URL}/collect-web-link/"
-        entetes = {
-            "Authorization": f"Token {token_campay}",
-            "Content-Type": "application/json"
-        }
+        entetes = {"Authorization": f"Token {token_campay}", "Content-Type": "application/json"}
         payload_lien = {
-            "amount": "14000",
-            "currency": "XAF",
+            "amount": "14000", "currency": "XAF",
             "description": f"Abonnement International Visa/MC - Boutique {cle_boutique[:8]}",
             "external_reference": cle_boutique
         }
         try:
             reponse_lien = requests.post(url_lien, json=payload_lien, headers=entetes, timeout=10)
-            if reponse_lien.status_code in [200 , 201]:
-                # On extrait le lien de la page internet généré par CamPay
-                lien_paiement_web = reponse_lien.json().get("link")
-                return {
-                    "statut": "SUCCESS_CARD",
-                    "lien_web": lien_paiement_web,
-                    "message": "Lien de paiement par carte Visa/Mastercard généré avec succès."
-                }
-            raise HTTPException(status_code=400, detail="Impossible de générer le lien bancaire.")
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+            if reponse_lien.status_code in [200, 201]:
+                return {"statut": "SUCCESS_CARD", "lien_web": reponse_lien.json().get("link")}
+            raise HTTPException(status_code=400, detail="Lien impossible.")
+        except Exception as e: raise HTTPException(status_code=500, detail=str(e))
 
-
-    # Validation stricte d'un vrai numéro africain/camerounais à 9 chiffres
     if not numero_telephone or len(numero_telephone) < 9:
-        raise HTTPException(status_code=422, detail="Veuillez entrer un numéro Mobile Money valide à 9 chiffres.")
-        
+        raise HTTPException(status_code=422, detail="Numéro Mobile Money invalide à 9 chiffres.")
     if not numero_telephone.startswith("+"):
-        if numero_telephone.startswith("237"):
-            numero_telephone = f"+{numero_telephone}"
-        else:
-            numero_telephone = f"+237{numero_telephone}"
+        numero_telephone = f"+{numero_telephone}" if numero_telephone.startswith("237") else f"+237{numero_telephone}"
 
     token_campay = obtenir_token_authentification_campay()
-    if not token_campay:
-        raise HTTPException(status_code=500, detail="Erreur d'authentification auprès de la passerelle financière.")
+    if not token_campay: raise HTTPException(status_code=500, detail="Erreur d'authentification.")
 
     url_collecte = f"{CAMPAY_BASE_URL}/collect/"
-    entetes = {
-        "Authorization": f"Token {token_campay}",
-        "Content-Type": "application/json"
-    }
-    
-    donnees_collecte = {
-        "amount": "14000",  # 🟢 TARIF DE PRODUCTION OFFICIEL COMMERCIAL
-        "currency": "XAF",
-        "from": numero_telephone,
-        "description": f"Abonnement Mensuel KashKeeper - Boutique {cle_boutique[:8]}",
-        "external_reference": cle_boutique
-    }
+    entetes = {"Authorization": f"Token {token_campay}", "Content-Type": "application/json"}
+    donnees_collecte = {"amount": "14000", "currency": "XAF", "from": numero_telephone, "description": f"Abonnement Mensuel - Boutique {cle_boutique[:8]}", "external_reference": cle_boutique}
 
     try:
         reponse = requests.post(url_collecte, json=donnees_collecte, headers=entetes, timeout=10)
-        
         if reponse.status_code in [200, 201]:
-            return {
-                "statut": "SUCCESS", 
-                "message": "Demande de paiement envoyée ! Regardez l'écran de votre téléphone pour taper votre code PIN."
-            }
-        raise HTTPException(status_code=400, detail="La passerelle de paiement a refusé la transaction (Vérifiez les fonds).")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erreur réseau passerelle : {str(e)}")
-
+            return {"statut": "SUCCESS", "message": "Demande envoyée ! Tapez votre code PIN sur votre téléphone."}
+        raise HTTPException(status_code=400, detail="La passerelle a refusé la transaction.")
+    except Exception as e: raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/licence/notification-paiement")
 def api_reception_webhook_campay(payload: dict):
-    """📡 WEBHOOK DE LIBÉRATION AUTONOME : Appelé par Campay dès que le PIN secret est validé."""
+    """Webhook automatique appelé par CamPay dès la réussite du code PIN."""
     cle_boutique = payload.get("external_reference")
-    statut_transaction = payload.get("status")
-    
-    if statut_transaction == "SUCCESSFUL" and cle_boutique:
+    if payload.get("status") == "SUCCESSFUL" and cle_boutique:
         date_actuelle_db = BASE_LICENCES_CLOUD.get(cle_boutique)
-        try:
-            date_base = datetime.strptime(date_actuelle_db, "%d/%m/%Y")
-            if date_base < datetime.now():
-                date_base = datetime.now()
-        except Exception:
-            date_base = datetime.now()
-            
-        # Extension d'un mois entier (30 jours) gravée de manière définitive sur le Cloud
+        try: date_base = datetime.strptime(date_actuelle_db, "%d/%m/%Y")
+        except Exception: date_base = datetime.now()
+        if date_base < datetime.now(): date_base = datetime.now()
         nouvelle_echeance = (date_base + timedelta(days=30)).strftime("%d/%m/%Y")
         BASE_LICENCES_CLOUD[cle_boutique] = nouvelle_echeance
-        
-        return {"status": "Abonnement mis à jour", "nouvelle_echeance": nouvelle_echeance}
-        
+        return {"status": "Mis à jour"}
     return {"status": "Ignoré"}
+# =====================================================================
+# FIN ABSOLUE DU CODE DU SERVEUR CLOUD RENDER - KASHFLOW ENGINE v6.0
+# =====================================================================
