@@ -114,7 +114,7 @@ def initialisation_systeme():
     """)
     
     # Injection du produit d'allumage par défaut
-    curseur.execute("INSERT OR IGNORE INTO stocks (modele, quantite_dispo, ventes_cumulees) VALUES ('tecno', 10, 0)")
+    #curseur.execute("INSERT OR IGNORE INTO stocks (modele, quantite_dispo, ventes_cumulees) VALUES ('tecno', 10, 0)")
     
     # 🟢 SÉCURITÉ CONSTRUCTEUR : Injection d'office du code d'usine serge2026
     curseur.execute("SELECT * FROM employes WHERE identifiant = 'gerant'")
@@ -400,40 +400,70 @@ def enregistrer_nom_boutique_sql(nom_magasin):
 # =====================================================================
 # MODULE 1 : data_base.py (Version Multi-Postes Pro - ÉTAPE 7 SUR 7)
 # =====================================================================
+# =====================================================================
+# MODULE 1 : data_base.py (Version Multi-Postes Pro - ÉTAPE 7 SUR 7 CORRIGÉE)
+# =====================================================================
 def extraire_statistiques_avancees(temporalite, valeur_cible):
-    """Analyse les tendances de ventes et extrait le produit phare (Zéro crash de conversion)."""
+    """Analyse les tendances de ventes et extrait le produit phare réel avec sa quantité cumulée."""
+    import sqlite3
+    import re
+    
     connexion = sqlite3.connect(DB_NAME)
     curseur = connexion.cursor()
-    produit_phare = "Aucun"
-    message_perf = "Aucune transaction enregistrée sur cette période."
+    
+    # Dictionnaire temporaire pour cumuler les quantités de chaque article sur la période
+    compteur_articles = {}
     
     try:
         if temporalite == "ANNEE":
-            curseur.execute("SELECT article, SUM(quantite) FROM ventes WHERE annee = ? GROUP BY article ORDER BY SUM(quantite) DESC LIMIT 1", (str(valeur_cible).strip(),))
+            curseur.execute("SELECT article FROM ventes WHERE annee = ?", (str(valeur_cible).strip(),))
         elif temporalite == "MOIS":
             m_propre = str(valeur_cible).strip().split("/")[0] if "/" in str(valeur_cible) else valeur_cible
-            curseur.execute("SELECT article, SUM(quantite) FROM ventes WHERE mois = ? GROUP BY article ORDER BY SUM(quantite) DESC LIMIT 1", (str(m_propre).strip(),))
+            curseur.execute("SELECT article FROM ventes WHERE mois = ?", (str(m_propre).strip(),))
         else:
             p = str(valeur_cible).strip().split("/")
             if len(p) == 3:
-                curseur.execute("SELECT article, SUM(quantite) FROM ventes WHERE jour = ? AND mois = ? AND annee = ? GROUP BY article ORDER BY SUM(quantite) DESC LIMIT 1", (str(p[0]), str(p[1]), str(p[2])))
+                curseur.execute("SELECT article FROM ventes WHERE jour = ? AND mois = ? AND annee = ?", (str(p[0]), str(p[1]), str(p[2])))
             else:
-                curseur.execute("SELECT article, SUM(quantite) FROM ventes WHERE jour = ? GROUP BY article ORDER BY SUM(quantite) DESC LIMIT 1", (str(valeur_cible).strip(),))
+                curseur.execute("SELECT article FROM ventes WHERE jour = ?", (str(valeur_cible).strip(),))
                 
-        ligne = curseur.fetchone()
-        if ligne:
-            produit_phare = str(ligne[0]).upper()
-            message_perf = f"Activité optimale constatée. Le produit phare est {produit_phare}."
+        lignes_ventes = curseur.fetchall()
+        
+        # Parcours et éclatement des paniers (Ventes simples et Ventes en gros)
+        for (article_brut,) in lignes_ventes:
+            lignes_articles = article_brut.split(", ")
+            for ligne in lignes_articles:
+                match_nom = re.match(r"^(.*?)\s*\(X\d+\)", ligne, re.IGNORECASE)
+                nom_article = match_nom.group(1).strip().upper() if match_nom else ligne.strip().upper()
+                
+                match_qte = re.search(r"\(X(\d+)\)", ligne, re.IGNORECASE)
+                qte_vendue = int(match_qte.group(1)) if match_qte else 1
+                
+                compteur_articles[nom_article] = compteur_articles.get(nom_article, 0) + qte_vendue
+                
+        if compteur_articles:
+            # On extrait l'article qui possède la plus grande quantité cumulée
+            meilleur_produit = max(compteur_articles, key=compteur_articles.get)
+            total_qte = compteur_articles[meilleur_produit]
+            produit_phare = f"{meilleur_produit} ({total_qte} Pcs)"
+            message_perf = f"Activité optimale constatée sur la cible. Le produit phare est {meilleur_produit}."
+        else:
+            produit_phare = "Aucun"
+            message_perf = "Aucune transaction enregistrée sur cette période."
+            
     except Exception as e:
         produit_phare = "Erreur"
-        message_perf = f"Anomalie de traitement : {e}"
+        message_perf = f"Anomalie de traitement statistique : {e}"
         
     connexion.close()
     return {"produit_phare": produit_phare, "message_performance": message_perf}
 
 
 def extraire_benefice_net_periode(temporalite, cible):
-    """Calcule le CA, extrait le coût d'achat du stock et soustrait les salaires RH."""
+    """Calcule le CA, éclate les paniers de gros pour extraire le coût d'achat réel et soustrait les salaires RH."""
+    import sqlite3
+    import re
+    
     connexion = sqlite3.connect(DB_NAME)
     curseur = connexion.cursor()
     ca_total = 0.0
@@ -442,32 +472,46 @@ def extraire_benefice_net_periode(temporalite, cible):
     
     try:
         if temporalite == "ANNEE":
-            curseur.execute("SELECT article, quantite, total_ttc FROM ventes WHERE annee = ?", (str(cible).strip(),))
+            curseur.execute("SELECT article, total_ttc, annee, mois, jour FROM ventes WHERE annee = ?", (str(cible).strip(),))
         elif temporalite == "MOIS":
             m_p = str(cible).strip().split("/")[0] if "/" in str(cible) else cible
-            curseur.execute("SELECT article, quantite, total_ttc FROM ventes WHERE mois = ?", (str(m_p).strip(),))
+            curseur.execute("SELECT article, total_ttc, annee, mois, jour FROM ventes WHERE mois = ?", (str(m_p).strip(),))
         else:
             p = str(cible).strip().split("/")
             if len(p) == 3:
-                curseur.execute("SELECT article, quantite, total_ttc FROM ventes WHERE jour = ? AND mois = ? AND annee = ?", (str(p[0]), str(p[1]), str(p[2])))
+                curseur.execute("SELECT article, total_ttc, annee, mois, jour FROM ventes WHERE jour = ? AND mois = ? AND annee = ?", (str(p[0]), str(p[1]), str(p[2])))
             else:
-                curseur.execute("SELECT article, quantite, total_ttc FROM ventes WHERE jour = ?", (str(cible).strip(),))
+                curseur.execute("SELECT article, total_ttc, annee, mois, jour FROM ventes WHERE jour = ?", (str(cible).strip(),))
         ventes_filtrees = curseur.fetchall()
     except Exception:
         ventes_filtrees = []
     
-    for article, qte, ttc in ventes_filtrees:
-        curseur.execute("SELECT prix_achat FROM stocks WHERE lower(modele) = ?", (str(article).lower().strip(),))
-        row = curseur.fetchone()
-        p_achat = float(row[0]) if (row and row[0] is not None) else 0.0
+    for row_vente in ventes_filtrees:
+        article_brut = row_vente[0]
+        ttc = row_vente[1]
         ca_total += float(ttc)
-        total_cout_achat += (p_achat * int(qte))
+        
+        # Éclatement chirurgical pour calculer le vrai coût de revient des ventes en gros
+        lignes_articles = article_brut.split(", ")
+        for ligne in lignes_articles:
+            match_nom = re.match(r"^(.*?)\s*\(X\d+\)", ligne, re.IGNORECASE)
+            nom_article_propre = match_nom.group(1).strip().lower() if match_nom else ligne.strip().lower()
+            
+            match_qte = re.search(r"\(X(\d+)\)", ligne, re.IGNORECASE)
+            quantite_vendue = int(match_qte.group(1)) if match_qte else 1
+            
+            curseur.execute("SELECT prix_achat FROM stocks WHERE lower(modele) = ?", (nom_article_propre,))
+            row_prix = curseur.fetchone()
+            p_achat = float(row_prix[0]) if (row_prix and row_prix[0] is not None) else 0.0
+            
+            total_cout_achat += (p_achat * quantite_vendue)
         
     # Extraction de la masse salariale mensuelle globale
     curseur.execute("SELECT SUM(salaire) FROM employes WHERE identifiant != 'gerant'")
     row_sal = curseur.fetchone()
     total_salaires = float(row_sal[0]) if (row_sal and row_sal[0] is not None) else 0.0
 
+    # Proratisation comptable stricte de la masse salariale selon la cible demandée
     if temporalite == "ANNEE":
         charges_personnel = total_salaires * 12
     elif temporalite == "JOUR":
@@ -478,4 +522,10 @@ def extraire_benefice_net_periode(temporalite, cible):
     benefice_net = ca_total - total_cout_achat - charges_personnel
     connexion.close()
     
-    return {"ca_total": ca_total, "benefice_net": benefice_net, "frais_achat": total_cout_achat, "charges_salaires": charges_personnel}
+    return {
+        "ca_total": round(ca_total, 2), 
+        "benefice_net": round(benefice_net, 2), 
+        "frais_achat": round(total_cout_achat, 2), 
+        "charges_salaires": round(charges_personnel, 2)
+    }
+

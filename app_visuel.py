@@ -372,8 +372,9 @@ def ouvrir_panneau_historique():
         return
 
     def action_exporter_registre_excel():
-        """Génère un rapport d'audit CSV d'usine directement dans le même dossier que l'exécutable."""
+        """Génère un rapport d'audit CSV d'usine détaillé en éclatant chaque article des factures de gros sur une ligne unique."""
         import csv
+        import re
         dossier_actuel = os.path.dirname(os.path.abspath(__file__))
         horodatage = datetime.now().strftime("%d_%m_%Y_%H%M")
         nom_fichier_csv = os.path.join(dossier_actuel, f"KashKeeper_Rapport_Ventes_{horodatage}.csv")
@@ -386,44 +387,78 @@ def ouvrir_panneau_historique():
                 
             with open(nom_fichier_csv, mode="w", newline="", encoding="utf-8-sig") as f:
                 ecrivain = csv.writer(f, delimiter=";")
+                # En-tête professionnelle réajustée
                 ecrivain.writerow([
-                    "N° FACTURE", "CLIENT", "ARTICLE / MODELE", "IMEI / SERIE / SAV", 
-                    "MONTANT HT (FCFA)", "VALEUR TVA (FCFA)", "TOTAL NET TTC (FCFA)", 
-                    "CAISSIERE EMETTEUR", "DATE FACTURATION", "HEURE", "SYNCHRONISÉ CLOUD"
+                    "N° FACTURE", "CLIENT", "ARTICLE / MODELE", "QUANTITÉ", 
+                    "MONTANT TOTAL TTC (FCFA)", "CAISSIERE EMETTEUR", "DATE FACTURATION", "HEURE", "SYNCHRONISÉ CLOUD"
                 ])
+                
                 for ligne in ventes_brutes:
-                    ecrivain.writerow(ligne)
+                    num_facture = ligne[0]
+                    client = ligne[1]
+                    article_brut = ligne[2]
+                    total_ttc = ligne[6]
+                    caissiere = ligne[7]
+                    date_f = ligne[8]
+                    heure_f = ligne[9]
+                    synchro = ligne[10]
                     
-            messagebox.showinfo("Exportation Réussie", f"📊 RAPPORT COMPTABLE GÉNÉRÉ !\n\nLe fichier Excel a été créé dans le dossier racine du logiciel :\n« {nom_fichier_csv} »")
+                    # Éclatement de la cellule si elle contient plusieurs marchandises (Vente en gros)
+                    lignes_articles = article_brut.split(", ")
+                    for art_ligne in lignes_articles:
+                        # On extrait proprement le nom pur du modèle et sa quantité
+                        match_nom = re.match(r"^(.*?)\s*\(X\d+\)", art_ligne, re.IGNORECASE)
+                        nom_pur = match_nom.group(1).strip().upper() if match_nom else art_ligne.strip().upper()
+                        
+                        match_qte = re.search(r"\(X(\d+)\)", art_ligne, re.IGNORECASE)
+                        qte_pure = int(match_qte.group(1)) if match_qte else 1
+                        
+                        # Écriture d'une ligne dédiée et aérée pour cet article spécifique dans le tableur Excel
+                        ecrivain.writerow([
+                            num_facture, client, nom_pur, qte_pure, 
+                            total_ttc, caissiere, date_f, heure_f, synchro
+                        ])
+                    
+            messagebox.showinfo("Exportation Réussie", f" Bars RAPPORT COMPTABLE GÉNÉRÉ !\n\nChaque article a été listé ligne par ligne avec succès :\n« {nom_fichier_csv} »")
         except Exception as e:
             messagebox.showerror("Erreur d'écriture", f"Impossible d'exporter le fichier Excel :\n{e}")
+
 
     def action_charger_statistiques():
         tempo = select_tempo.get()
         cible = entree_cible.get().strip()
         
         if not cible:
-            messagebox.showwarning("Critère manquant", "Veuillez entrer une valeur cible (ex: 27/9/2026, 9, 2026).")
+            messagebox.showwarning("Critère manquant", "Veuillez entrer une valeur cible (ex: 29/09/2026, 09/2026, 2026).")
             return
             
         try:
             statistiques = data_base.extraire_statistiques_avancees(tempo, cible)
             calcul_gains = data_base.extraire_benefice_net_periode(tempo, cible)
             
-            # 🟢 AFFICHAGE COMPTABLE NET COHÉRENT : S'allume à 0 si la date est fausse
+            # 🟢 AFFICHAGE COMPTABLE NET COHÉRENT
+            # 🟢 CORRIGÉ : Affichage unifié du Chiffre d'Affaires global
             label_ca.config(
-                text=f"📊 CA TOTAL TTC : {calcul_gains['ca_total']:,} FCFA | 🔥 BÉNÉFICE NET REEL : {calcul_gains['benefice_net']:,} FCFA", 
-                bg="#10b981", 
+                text=f"📊 CHIFFRE D'AFFAIRES GLOBAL TTC : {calcul_gains['ca_total']:,} FCFA", 
+                bg="#0f766e", 
                 fg="white",
                 font=("Helvetica", 11, "bold")
             )
+            
+            # 🟢 CORRIGÉ : Injection du BÉNÉFICE NET RÉEL calculé sur la période ciblée
             label_top.config(
-                text=f"🔥 Produit Phare : {statistiques['produit_phare']} | Coût d'achat stock : {calcul_gains['frais_achat']:,} FCFA | 👥 Charges salariales : {calcul_gains['charges_salaires']:,} FCFA",
+                text=f"🔥 Produit Phare : {statistiques['produit_phare']} | 💸 BÉNÉFICE NET RÉEL : {calcul_gains['benefice_net']:,} FCFA\n"
+                     f"📦 Coût d'achat stock : {calcul_gains['frais_achat']:,} FCFA | 👥 Charges salariales : {calcul_gains['charges_salaires']:,} FCFA",
                 font=("Helvetica", 9, "bold")
             )
+
             label_perf.config(text=statistiques['message_performance'])
+            
+            # 🟢 SYNCHRONISATION SYNCHRONISÉE : On force la grille du bas à se caler immédiatement sur la même cible
+            action_afficher_tout_historique()
         except Exception as e:
             messagebox.showerror("Erreur d'analyse", f"Impossible de charger les données financières :\n{e}")
+
             
             
 # =====================================================================
@@ -1049,12 +1084,15 @@ def ouvrir_comptoir_facturation():
                     calcul["montant_ht"], calcul["valeur_tva"], calcul["total_ttc"]
                 )
                 
+                # 🟢 CAS N°1 : ARTICLE UNIQUE - IMPRESSION THERMIQUE DIRECTE SÉCURISÉE
                 try:
-                    liste_imp = [imp[2].lower() for imp in win32print.EnumPrinters(win32print.PRINTER_ENUM_LOCAL | win32print.PRINTER_ENUM_CONNECTIONS)]
+                    # Extraction robuste du nom de l'imprimante (Indice -1 pour cibler le nom brut du pilote Windows)
+                    liste_imp = [str(imp[-1]).lower() for imp in win32print.EnumPrinters(win32print.PRINTER_ENUM_LOCAL | win32print.PRINTER_ENUM_CONNECTIONS)]
                     if any(mot in name for mot in ["thermal", "pos", "58", "80", "xp-"] for name in liste_imp):
                         imprimer_ticket_thermique_direct(nom_client, panier_virtuel_unique, calcul["total_ttc"], caissiere_nom)
-                except Exception:
-                    pass
+                except Exception as err_imp:
+                    logging.warning("Échec envoi impression direct article unique : %s", err_imp)
+
 
                 donnees_cloud = {"client": nom_client, "article": string_articles, "description_unique": string_desc, "prix_ht": calcul["montant_ht"], "quantite": qte, "caissiere": caissiere_nom, "applique_tva_vente": applique_tva}
                 threading.Thread(target=synchroniser_vente_cloud, args=(reference_locale, donnees_cloud), daemon=True).start()
@@ -1073,7 +1111,7 @@ def ouvrir_comptoir_facturation():
                 general_tva = sum(p["total_tva"] for p in PANIER_FACTURE_EN_COURS)
                 general_ttc = sum(p["total_ttc"] for p in PANIER_FACTURE_EN_COURS)
                 
-                string_articles = ", ".join([f"{p['article'].upper()} (x{p['quantite']})" for p in PANIER_FAURS_EN_COURS]) if 'PANIER_FAURS_EN_COURS' in locals() else ", ".join([f"{p['article'].upper()} (x{p['quantite']})" for p in PANIER_FACTURE_EN_COURS])
+                string_articles = ", ".join([f"{p['article'].upper()} (X{p['quantite']})" for p in PANIER_FACTURE_EN_COURS])
                 string_desc = " | ".join([f"{p['article'].upper()}: {p['description_unique']}" for p in PANIER_FACTURE_EN_COURS])
                 
                 num_facture = data_base.enregistrer_vente_sql(
@@ -1089,12 +1127,14 @@ def ouvrir_comptoir_facturation():
                         general_ht, general_tva, general_ttc
                     )
 
+                    # 🟢 CAS N°2 : FACTURE DE GROS - IMPRESSION THERMIQUE DIRECTE SÉCURISÉE
                     try:
-                        liste_imp = [imp[2].lower() for imp in win32print.EnumPrinters(win32print.PRINTER_ENUM_LOCAL | win32print.PRINTER_ENUM_CONNECTIONS)]
+                        liste_imp = [str(imp[-1]).lower() for imp in win32print.EnumPrinters(win32print.PRINTER_ENUM_LOCAL | win32print.PRINTER_ENUM_CONNECTIONS)]
                         if any(mot in name for mot in ["thermal", "pos", "58", "80", "xp-"] for name in liste_imp):
                             imprimer_ticket_thermique_direct(nom_client, PANIER_FACTURE_EN_COURS, general_ttc, caissiere_nom)
-                    except Exception:
-                        pass
+                    except Exception as err_imp:
+                        logging.warning("Échec envoi impression direct facture de gros : %s", err_imp)
+
 
                     donnees_cloud = {"client": nom_client, "article": string_articles, "description_unique": string_desc, "prix_ht": general_ht, "quantite": 1, "caissiere": caissiere_nom, "applique_tva_vente": 1}
                     threading.Thread(target=synchroniser_vente_cloud, args=(reference_locale, donnees_cloud), daemon=True).start()
@@ -1375,9 +1415,10 @@ def ouvrir_historique_caissiere():
     # Allumage automatique immédiat dès l'ouverture du panneau orange
     rafraichir_historique_caissiere_local(filtrer=False)
 
-# --- POINT DE DÉMARRAGE DE LA RACINE UNIQUE avec verifier_acces() injectée ---
+
+# --- LOGIQUE SÉCURITÉ COMPTOIR : VERIFICATION DES ACCÈS ET CONTRÔLE DE LICENCE SAAS ---
 def verifier_acces():
-    """Valide la session employé et gère le mot de passe d'usine serge2026 à chaud."""
+    """Valide la session employé et applique le contrôle de licence SaaS bloquant et inviolable."""
     global SESSION_UTILISATEUR, NOM_CAISSIERE_ACTIVE
     user = entree_user.get().strip().lower()
     pwd = entree_password.get().strip()
@@ -1433,8 +1474,28 @@ def verifier_acces():
             messagebox.showerror("Accès Refusé", "Ce mot de passe d'usine a expiré après la configuration initiale.")
             return
 
-        # 🟢 CAS 2 : Utilisation quotidienne classique
+        # 🟢 CAS 2 : Utilisation quotidienne classique avec contrôle de licence SaaS bloquant
         if data_base.verifier_identifiants_sql(user, pwd):
+            try:
+                # Interrogation sécurisée des serveurs cloud pour la règle des 32 jours
+                reponse_licence = requests.get(
+                    f"{URL_API_KASHFLOW}/licence/statut", 
+                    headers={"X-API-Key": CLE_API_KASHFLOW}, 
+                    timeout=5
+                )
+                if reponse_licence.status_code == 200:
+                    infos = reponse_licence.json()
+                    statut_serveur = infos.get("statut", "actif")
+                    jours_restants = infos.get("jours_restants", 0)
+
+                    if statut_serveur == "expire":
+                        messagebox.showerror("Abonnement Expiré", "🚨 COMPTOIR SÉCURISÉ VERROUILLÉ !\n\nVotre période d'abonnement mensuel et de grâce est terminée.\nVeuillez régulariser en cliquant sur 'PAYER ABONNEMENT' en bas à droite de l'écran d'accueil.")
+                        return 
+                    elif statut_serveur == "grace":
+                        messagebox.showwarning("Avertissement Grâce", f"⚠️ MODE TOLÉRANCE ACTIF :\n\nVotre licence a expiré. Il vous reste {jours_restants} jour(s) de grâce avant blocage total du système.")
+            except Exception as e:
+                logging.warning("Liaison contrôle licence asynchrone hors-ligne : %s", e)
+
             SESSION_UTILISATEUR = str(user).strip().lower()
             NOM_CAISSIERE_ACTIVE = str(user).strip().lower()
             messagebox.showinfo("Accès Autorisé", f"Bienvenue {SESSION_UTILISATEUR.upper()} !")
@@ -1447,7 +1508,7 @@ def verifier_acces():
 
 
 def recuperer_mot_de_passe_oublie():
-    """Permet la récupération par clé master uniquement si le profil de base a été configuré."""
+    """Permet la récupération par clé master avec une interface de saisie masquée par des étoiles (*)."""
     try:
         connexion = sqlite3.connect(data_base.DB_NAME)
         curseur = connexion.cursor()
@@ -1460,16 +1521,54 @@ def recuperer_mot_de_passe_oublie():
             messagebox.showwarning("Action Impossible", "Veuillez d'abord vous connecter normalement avec le code d'usine pour configurer la boutique.")
             return
 
-        cle_saisie = simpledialog.askstring("Sécurité Constructeur", "Veuillez entrer la clé de secours fournie par l'ingénieur Serges :")
-        if cle_saisie == CLE_MASTER_SERGE:
-            nouveau_code = simpledialog.askstring("Réinitialisation", "Clé correcte !\nTapez votre nouveau mot de passe gérant :")
-            if nouveau_code and nouveau_code.strip():
-                data_base.configurer_compte_gerant_sql(nouveau_code.strip())
-                messagebox.showinfo("Succès", "Mot de passe réinitialisé ! Connectez-vous.")
-        elif cle_saisie is not None:
-            messagebox.showerror("Accès Refusé", "Clé de secours invalide.")
+        def valider_cle_secours():
+            cle_saisie = entree_cle.get().strip()
+            if cle_saisie == CLE_MASTER_SERGE:
+                fenetre_cle.destroy()
+                # Demande du nouveau mot de passe personnalisé
+                nouveau_code = simpledialog.askstring("Réinitialisation", "Clé correcte !\nTapez votre nouveau mot de passe gérant :", show="*")
+                if nouveau_code and nouveau_code.strip():
+                    data_base.configurer_compte_gerant_sql(nouveau_code.strip())
+                    messagebox.showinfo("Succès", "Mot de passe réinitialisé avec succès ! Connectez-vous.")
+            else:
+                messagebox.showerror("Accès Refusé", "Clé de secours invalide.")
+                entree_cle.delete(0, tk.END)
+
+        # 🔑 CREATION D'UNE BOÎTE DE DIALOGUE SÉCURISÉE SUR-MESURE
+        fenetre_cle = Toplevel(FENETRE_PRINCIPALE_LOGIN)
+        fenetre_cle.title("Sécurité Constructeur")
+        fenetre_cle.geometry("320x150")
+        fenetre_cle.configure(bg="#1e293b")
+        fenetre_cle.resizable(False, False)
+        fenetre_cle.grab_set()
+
+        tk.Label(
+            fenetre_cle, 
+            text="ENTREZ LA CLÉ DE SECOURS INGÉNIEUR :", 
+            font=("Helvetica", 9, "bold"), 
+            bg="#1e293b", 
+            fg="white"
+        ).pack(pady=12)
+
+        # 🟢 CORRIGÉ : L'option show="*" masque instantanément la saisie à l'écran
+        entree_cle = tk.Entry(fenetre_cle, font=("Helvetica", 11), show="*", bd=2, justify=tk.CENTER)
+        entree_cle.pack(fill=tk.X, padx=30, pady=5)
+        entree_cle.focus()
+        
+        entree_cle.bind("<Return>", lambda event: valider_cle_secours())
+
+        tk.Button(
+            fenetre_cle, 
+            text="🔓 VÉRIFIER LA CLÉ", 
+            font=("Helvetica", 9, "bold"), 
+            bg="#3b82f6", 
+            fg="white", 
+            command=valider_cle_secours
+        ).pack(fill=tk.X, padx=30, pady=10)
+
     except Exception as e:
         messagebox.showerror("Erreur", f"Erreur système : {str(e)}")
+
 
 def action_telecharger_mise_a_jour():
     """Interroge le Cloud Render, télécharge le nouveau code et remplace le fichier actuel à chaud."""
@@ -1510,73 +1609,83 @@ def action_telecharger_mise_a_jour():
         messagebox.showerror("Échec réseau", f"Impossible de joindre le serveur Cloud pour la mise à jour :\n{e}")
 
 
-# --- POINT DE DÉMARRAGE DE LA RACINE UNIQUE ---
-login = tk.Tk()
-FENETRE_PRINCIPALE_LOGIN = login
+def ouvrir_fenetre_paiement():
+    """Fenêtre de paiement SaaS CamPay (Momo Cameroun) et PaySika (Carte Internationale Visa/MC)."""
+    def action_declencher_prelevement():
+        num_momo = entree_numero_momo.get().strip()
+        if mode_paiement.get() == "MOMO" and (not num_momo or len(num_momo) < 9):
+            messagebox.showwarning("Numéro invalide", "Entrez un numéro valide à 9 chiffres.")
+            return
+        if mode_paiement.get() != "MOMO":
+            num_momo = "CARTE_BANCAIRE"
 
-login.title("Sécurité d'Accès")
-login.geometry("350x460") # Augmenté de 420 à 460 pour offrir une marge d'espace au nouveau bouton
-login.configure(bg="#1e293b")
+        btn_payer.config(text="🔄 APPEL RÉSEAU EN COURS...", state=tk.DISABLED, bg="#475569")
+        fenetre_paye.update_idletasks()
 
-tk.Label(login, text="CONNEXION SÉCURISÉE", font=("Helvetica", 12, "bold"), bg="#1e293b", fg="white").pack(pady=20)
-boite = tk.Frame(login, bg="#1e293b", padx=30)
-boite.pack(fill=tk.X)
+        try:
+            reponse = requests.post(f"{URL_API_KASHFLOW}/licence/collecter-momo", json={"numero": num_momo}, headers={"X-API-Key": CLE_API_KASHFLOW}, timeout=12)
+            if reponse.status_code == 200:
+                donnees = reponse.json()
+                if donnees.get("statut") == "SUCCESS_CARD":
+                    webbrowser.open(donnees.get("lien_web"))
+                else:
+                    messagebox.showinfo("Paiement Initié", f"📱 {donnees.get('message')}\n\nSi vous rencontrez des blocages de documents, contactez l'ingénieur Serges sur WhatsApp.")
+                fenetre_paye.destroy()
+            else:
+                try: error_msg = reponse.json().get("detail", "Refus de la passerelle.")
+                except Exception: error_msg = "Erreur de communication."
+                messagebox.showerror("Échec", f"🔴 {error_msg}\n\nEn cas de problème réglementaire, contactez le support WhatsApp constructeur.")
+                btn_payer.config(text="🚀 DEMANDER LE RETRAIT SÉCURISÉ", state=tk.NORMAL, bg="#10b981")
+        except Exception as e:
+            messagebox.showerror("Erreur", f"Impossible de joindre Render :\n{e}")
+            btn_payer.config(text="🚀 DEMANDER LE RETRAIT SÉCURISÉ", state=tk.NORMAL, bg="#10b981")
 
-tk.Label(boite, text="Identifiant Employé :", bg="#1e293b", fg="#cbd5e1").pack(anchor=tk.W)
-entree_user = tk.Entry(boite, font=("Helvetica", 11), bd=2)
-entree_user.pack(fill=tk.X, pady=5)
-entree_user.insert(0, "gerant")
+    def toggle_champs_paiement():
+        if mode_paiement.get() == "MOMO":
+            cadre_input.pack(fill=tk.X, pady=10, before=btn_payer)
+        else:
+            cadre_input.pack_forget()
 
-tk.Label(boite, text="Mot de passe secret :", bg="#1e293b", fg="#cbd5e1").pack(anchor=tk.W)
+    fenetre_paye = Toplevel(FENETRE_PRINCIPALE_LOGIN)
+    fenetre_paye.title("💳 Renouvellement Abonnement - Caisse Pro")
+    fenetre_paye.geometry("440x420")
+    fenetre_paye.configure(bg="#1e293b")
+    fenetre_paye.resizable(False, False)
+    fenetre_paye.grab_set()
 
-# =====================================================================
-# ÉCRAN DE VERROUILLAGE SÉCURISÉ ET CONFIGURATION DU POINT DE DÉMARRAGE
-# =====================================================================
+    tk.Label(fenetre_paye, text="RENOUVELLEMENT DE L'ABONNEMENT ", font=("Segoe UI", 11, "bold"), bg="#1e293b", fg="#f59e0b").pack(pady=15)
+    
+    cadre_choix = tk.Frame(fenetre_paye, bg="#1e293b")
+    cadre_choix.pack(pady=5)
+    mode_paiement = tk.StringVar(value="MOMO")
 
-entree_password = tk.Entry(boite, font=("Helvetica", 11), show="*", bd=2)
-entree_password.pack(fill=tk.X, pady=5)
+    tk.Radiobutton(cadre_choix, text="📱 Mobile Money ", variable=mode_paiement, value="MOMO", bg="#1e293b", fg="white", selectcolor="#1e293b", font=("Segoe UI", 9, "bold"), command=toggle_champs_paiement).pack(side=tk.LEFT, padx=15)
+    tk.Radiobutton(cadre_choix, text="💳 Carte Bancaire / Cartes Visa / Mastercard", variable=mode_paiement, value="CARD", bg="#1e293b", fg="white", selectcolor="#1e293b", font=("Segoe UI", 9, "bold"), command=toggle_champs_paiement).pack(side=tk.LEFT, padx=15)
 
-entree_user.bind("<Return>", lambda event: entree_password.focus())
-entree_password.bind("<Return>", lambda event: verifier_acces())
+    cadre_texte = tk.Frame(fenetre_paye, bg="#1e293b", padx=20)
+    cadre_texte.pack(fill=tk.X)
+    tk.Label(cadre_texte, text="Tarif mensuel : 14 000 FCFA", font=("Segoe UI", 10, "bold"), bg="#1e293b", fg="#cbd5e1").pack(anchor=tk.W, pady=5)
 
-# 1. Bouton d'accès principal au comptoir
-tk.Button(
-    login, 
-    text="🔓 ACCÉDER AU COMPTOIR", 
-    font=("Helvetica", 11, "bold"), 
-    bg="#3b82f6", 
-    fg="white", 
-    command=verifier_acces
-).pack(fill=tk.X, padx=30, pady=12)
+    cadre_input = tk.Frame(fenetre_paye, bg="#1e293b", padx=20)
+    cadre_input.pack(fill=tk.X, pady=5)
+    
+    entree_numero_momo = tk.Entry(cadre_input, font=("Segoe UI", 13, "bold"), bg="white", fg="#1e293b", justify=tk.CENTER)
+    entree_numero_momo.pack(fill=tk.X, ipady=4)
+    entree_numero_momo.insert(0, "6")
 
-# 2. 🟢 INTERCONNEXION SAAS : Bouton de mise à jour à distance ancré sur la page de connexion
-tk.Button(
-    login, 
-    text="🔄 VÉRIFIER LES MISES À JOUR", 
-    font=("Helvetica", 10, "bold"), 
-    bg="#475569", 
-    fg="white", 
-    command=action_telecharger_mise_a_jour
-).pack(fill=tk.X, padx=30, pady=5)
+    # 🟢 SÉCURITÉ CONSTRUCTEUR : Création de l'objet bouton avant appel de sa configuration
+    btn_payer = tk.Button(fenetre_paye, text="🚀  PAYER L'ABONNEMENT ", bg="#10b981", fg="white", font=("Segoe UI", 10, "bold"), bd=0, cursor="hand2", command=action_declencher_prelevement, pady=6)
+    btn_payer.pack(fill=tk.X, padx=20, pady=15)
 
-# 3. Bouton mot de passe oublié
-tk.Button(
-    login, 
-    text="❓ Mot de passe oublié / Réinitialiser", 
-    font=("Helvetica", 9, "underline"), 
-    bg="#1e293b", 
-    fg="#94a3b8", 
-    bd=0, 
-    command=recuperer_mot_de_passe_oublie, 
-    cursor="hand2"
-).pack(pady=10)
+    # Ajustement de configuration d'usine post-initialisation
+    btn_payer.config(text="🚀 PAYER L'ABONNEMENT", state=tk.NORMAL, bg="#10b981")
+    
+    tk.Button(fenetre_paye, text="ANNULER", bg="#1e293b", fg="#94a3b8", font=("Segoe UI", 9, "underline"), bd=0, cursor="hand2", command=fenetre_paye.destroy).pack()
+
+
 def ouvrir_fenetre_modification_mdp_caissiere():
     """Ouvre une interface sécurisée permettant à la caissière connectée de changer son mot de passe."""
     caissiere_active = str(NOM_CAISSIERE_ACTIVE).strip().lower()
-    
-    """if caissiere_active == "gerant":
-        messagebox.showinfo("RH", "Le gérant utilise la clé de secours master ou le panneau RH dédié.")
-        return"""
 
     # Demande de l'ancien mot de passe pour vérification de sécurité
     ancien_pwd = simpledialog.askstring("Sécurité", "Entrez votre mot de passe ACTUEL :", show="*")
@@ -1609,4 +1718,44 @@ def ouvrir_fenetre_modification_mdp_caissiere():
     except Exception as e:
         messagebox.showerror("Erreur système", f"Impossible de modifier le mot de passe : {e}")
 
+
+# --- CONFIGURATION ET ALLUMAGE DE L'ÉCRAN GRAPHIQUE RACINE WINDOWS ---
+login = tk.Tk()
+FENETRE_PRINCIPALE_LOGIN = login
+login.title("Sécurité d'Accès")
+login.geometry("350x460")
+login.configure(bg="#1e293b")
+login.resizable(False, False)
+
+tk.Label(login, text="CONNEXION SÉCURISÉE", font=("Helvetica", 12, "bold"), bg="#1e293b", fg="white").pack(pady=20)
+boite = tk.Frame(login, bg="#1e293b", padx=30)
+boite.pack(fill=tk.X)
+
+tk.Label(boite, text="Identifiant Employé :", bg="#1e293b", fg="#cbd5e1").pack(anchor=tk.W)
+entree_user = tk.Entry(boite, font=("Helvetica", 11), bd=2)
+entree_user.pack(fill=tk.X, pady=5)
+entree_user.insert(0, "gerant")
+
+tk.Label(boite, text="Mot de passe secret :", bg="#1e293b", fg="#cbd5e1").pack(anchor=tk.W)
+entree_password = tk.Entry(boite, font=("Helvetica", 11), show="*", bd=2)
+entree_password.pack(fill=tk.X, pady=5)
+
+# 🟢 RESTAURATION DES CHAINES CLAVIER CORRECTES
+entree_user.bind("<Return>", lambda event: entree_password.focus())
+entree_password.bind("<Return>", lambda event: verifier_acces())
+
+# Boutons d'allumage des interfaces
+tk.Button(login, text="🔓 ACCÉDER AU COMPTOIR", font=("Helvetica", 11, "bold"), bg="#3b82f6", fg="white", command=verifier_acces).pack(fill=tk.X, padx=30, pady=12)
+tk.Button(login, text="🔄 VÉRIFIER LES MISES À JOUR", font=("Helvetica", 10, "bold"), bg="#475569", fg="white", command=action_telecharger_mise_a_jour).pack(fill=tk.X, padx=30, pady=5)
+tk.Button(login, text="❓ Mot de passe oublié / Réinitialiser", font=("Helvetica", 9, "underline"), bg="#1e293b", fg="#94a3b8", bd=0, command=recuperer_mot_de_passe_oublie, cursor="hand2").pack(pady=5)
+
+cadre_bas = tk.Frame(login, bg="#1e293b")
+cadre_bas.pack(fill=tk.X, side=tk.BOTTOM, padx=15, pady=10)
+
+# 🟢 ENREGISTREMENT ET RE-ANCRAGE DU BOUTON ORANGE
+btn_abonnement = tk.Button(cadre_bas, text="💳 PAYER ABONNEMENT", font=("Helvetica", 8, "bold", "underline"), bg="#1e293b", fg="#f59e0b", bd=0, cursor="hand2", command=ouvrir_fenetre_paiement)
+btn_abonnement.pack(side=tk.RIGHT)
+
+# Allumage officiel du logiciel d'usine
 login.mainloop()
+
