@@ -8,7 +8,6 @@ import logging
 import os
 import threading
 import uuid
-from datetime import datetime
 import requests
 import data_base
 import operation
@@ -16,6 +15,7 @@ import json
 import win32print
 import win32ui
 import webbrowser
+from datetime import datetime, timedelta
 
 # Lancement des configurations SQLite d'usine au démarrage du logiciel
 data_base.initialisation_systeme()
@@ -23,7 +23,7 @@ data_base.initialisation_systeme()
 # Variables globales de contrôle des privilèges et sécurité constructeur
 SESSION_UTILISATEUR = "caissier"
 NOM_CAISSIERE_ACTIVE = "Anonyme"
-NOM_BOUTIQUE_FIXE = "KASHFLOW_MANAGER"
+NOM_BOUTIQUE_FIXE = "KASHKEEPER"
 CLE_MASTER_SERGE = "Je suis simple"
 
 URL_API_KASHFLOW = "https://onrender.com" 
@@ -1475,32 +1475,45 @@ def verifier_acces():
             return
 
         # 🟢 CAS 2 : Utilisation quotidienne classique avec contrôle de licence SaaS bloquant
+        # 🛡️ INTERCONNEXION SAAS BLINDÉE : Appel de licence avec bascule sur la clé de secours manuelle
         if data_base.verifier_identifiants_sql(user, pwd):
+            autorisation_ouvrir_comptoir = True
+            
             try:
-                # Interrogation sécurisée des serveurs cloud pour la règle des 32 jours
-                reponse_licence = requests.get(
-                    f"{URL_API_KASHFLOW}/licence/statut", 
-                    headers={"X-API-Key": CLE_API_KASHFLOW}, 
-                    timeout=5
-                )
+                reponse_licence = requests.get(f"{URL_API_KASHFLOW}/licence/statut", headers={"X-API-Key": CLE_API_KASHFLOW}, timeout=5)
                 if reponse_licence.status_code == 200:
                     infos = reponse_licence.json()
                     statut_serveur = infos.get("statut", "actif")
                     jours_restants = infos.get("jours_restants", 0)
 
                     if statut_serveur == "expire":
-                        messagebox.showerror("Abonnement Expiré", "🚨 COMPTOIR SÉCURISÉ VERROUILLÉ !\n\nVotre période d'abonnement mensuel et de grâce est terminée.\nVeuillez régulariser en cliquant sur 'PAYER ABONNEMENT' en bas à droite de l'écran d'accueil.")
-                        return 
+                        # 🟢 BASCULE SÉCURISÉE : Si le Cloud dit expiré, on vérifie si le gérant a un code d'activation WhatsApp local valide
+                        conn = sqlite3.connect(data_base.DB_NAME)
+                        row_secours = conn.execute("SELECT valeur FROM configuration WHERE cle = 'licence_secours_expire'").fetchone()
+                        conn.close()
+                        
+                        autorisation_ouvrir_comptoir = False
+                        if row_secours:
+                            date_exp_secours = datetime.strptime(row_secours[0], "%d/%m/%Y")
+                            # Si la date de la clé de secours est toujours supérieure ou égale à aujourd'hui, on autorise l'accès !
+                            if (date_exp_secours - datetime.now()).days >= 0:
+                                autorisation_ouvrir_comptoir = True
+                        
+                        if not autorisation_ouvrir_comptoir:
+                            messagebox.showerror("Abonnement Expiré", "🚨 COMPTOIR SÉCURISÉ VERROUILLÉ !\n\nVotre période d'abonnement est terminée.\nVeuillez régulariser manuellement via le bouton 'CONTACT SUPPORT' ou 'PAYER ABONNEMENT'.")
+                            return 
                     elif statut_serveur == "grace":
                         messagebox.showwarning("Avertissement Grâce", f"⚠️ MODE TOLÉRANCE ACTIF :\n\nVotre licence a expiré. Il vous reste {jours_restants} jour(s) de grâce avant blocage total du système.")
             except Exception as e:
                 logging.warning("Liaison contrôle licence asynchrone hors-ligne : %s", e)
 
-            SESSION_UTILISATEUR = str(user).strip().lower()
-            NOM_CAISSIERE_ACTIVE = str(user).strip().lower()
-            messagebox.showinfo("Accès Autorisé", f"Bienvenue {SESSION_UTILISATEUR.upper()} !")
-            FENETRE_PRINCIPALE_LOGIN.withdraw()
-            ouvrir_comptoir_facturation()
+            if autorisation_ouvrir_comptoir:
+                SESSION_UTILISATEUR = str(user).strip().lower()
+                NOM_CAISSIERE_ACTIVE = str(user).strip().lower()
+                messagebox.showinfo("Accès Autorisé", f"Bienvenue {SESSION_UTILISATEUR.upper()} !")
+                FENETRE_PRINCIPALE_LOGIN.withdraw()
+                ouvrir_comptoir_facturation()
+
         else:
             messagebox.showerror("Accès Refusé", "Identifiant ou mot de passe incorrect.")
     except Exception as e:
@@ -1673,13 +1686,48 @@ def ouvrir_fenetre_paiement():
     entree_numero_momo.pack(fill=tk.X, ipady=4)
     entree_numero_momo.insert(0, "6")
 
-    # 🟢 SÉCURITÉ CONSTRUCTEUR : Création de l'objet bouton avant appel de sa configuration
-    btn_payer = tk.Button(fenetre_paye, text="🚀  PAYER L'ABONNEMENT ", bg="#10b981", fg="white", font=("Segoe UI", 10, "bold"), bd=0, cursor="hand2", command=action_declencher_prelevement, pady=6)
-    btn_payer.pack(fill=tk.X, padx=20, pady=15)
+    # =====================================================================
+    # 🔑 ALGORITHME CHIRURGICAL DE SÉCURITÉ : VÉRIFICATION DU CODE WHATSAPP
+    # =====================================================================
+    def action_activer_par_cle_secours_whatsapp():
+        cle_client = str(CLE_API_KASHFLOW).strip()
+        code_saisi = simpledialog.askstring("Activation Manuelle", "Saisissez la clé d'activation mensuelle fournie par l'ingénieur :", parent=fenetre_paye)
+        if not code_saisi: return
+        
+        import hashlib
+        maintenant = datetime.now()
+        # Génération du jeton d'usine basé sur la clé, le mois et l'année en cours (Octobre 2026)
+        sel_secret = f"{cle_client}-{maintenant.month}-{maintenant.year}-KASHKEEPER-SERGE"
+        signature_attendue = hashlib.md5(sel_secret.encode("utf-8")).hexdigest().upper()[:8]
+        
+        # Format strict de la clé : KASH-XXXX-XXXX
+        code_officiel_attendu = f"KASH-{signature_attendue[:4]}-{signature_attendue[4:]}"
+        
+        if code_saisi.strip().upper() == code_officiel_attendu:
+            try:
+                # Écriture immédiate sur le disque local de la caisse pour +30 jours
+                conn = sqlite3.connect(data_base.DB_NAME)
+                conn.execute("INSERT OR REPLACE INTO configuration (cle, valeur) VALUES ('licence_secours_expire', ?)", 
+                             ((maintenant + timedelta(days=30)).strftime("%d/%m/%Y"),))
+                conn.commit()
+                conn.close()
+                messagebox.showinfo("✨ Succès Absolu", "FÉLICITATIONS, COMPTOIR DE VENTE DÉBLOQUÉ !\n\nVotre application a été réactivée localement avec succès pour 30 jours.")
+                fenetre_paye.destroy()
+            except Exception as e:
+                messagebox.showerror("Erreur", f"Impossible d'enregistrer la clé de secours : {e}")
+        else:
+            messagebox.showerror("Accès Refusé", "Clé d'activation mensuelle invalide ou expirée.\n\nVeuillez contacter votre support technique.")
 
-    # Ajustement de configuration d'usine post-initialisation
-    btn_payer.config(text="🚀 PAYER L'ABONNEMENT", state=tk.NORMAL, bg="#10b981")
+    # 🟢 BOUTON 1 (D'ORIGINE RESTAURÉ) : Option automatique conservée intacte pour plus tard
+    btn_payer = tk.Button(fenetre_paye, text="🚀  DEMANDER LE RETRAIT SÉCURISÉ", bg="#10b981", fg="white", font=("Segoe UI", 10, "bold"), bd=0, cursor="hand2", command=action_declencher_prelevement, pady=6)
+    btn_payer.pack(fill=tk.X, padx=20, pady=10)
+    btn_payer.config(text="🚀 DEMANDER LE RETRAIT SÉCURISÉ", state=tk.NORMAL, bg="#10b981")
+
+    # 🟢 BOUTON 2 (NOUVEAU) : Utiliser la clé d'activation manuelle Orange Money / MTN MoMo
+    btn_cle_manuel = tk.Button(fenetre_paye, text="🔑  UTILISER LA CLÉ D'ACTIVATION MANUELLE", bg="#f59e0b", fg="white", font=("Segoe UI", 10, "bold"), bd=0, cursor="hand2", command=action_activer_par_cle_secours_whatsapp, pady=6)
+    btn_cle_manuel.pack(fill=tk.X, padx=20, pady=5)
     
+    # 🟢 BOUTON 3 (D'ORIGINE CONSERVÉ) : Fermeture de la boîte de dialogue
     tk.Button(fenetre_paye, text="ANNULER", bg="#1e293b", fg="#94a3b8", font=("Segoe UI", 9, "underline"), bd=0, cursor="hand2", command=fenetre_paye.destroy).pack()
 
 
@@ -1749,11 +1797,55 @@ tk.Button(login, text="🔓 ACCÉDER AU COMPTOIR", font=("Helvetica", 11, "bold"
 tk.Button(login, text="🔄 VÉRIFIER LES MISES À JOUR", font=("Helvetica", 10, "bold"), bg="#475569", fg="white", command=action_telecharger_mise_a_jour).pack(fill=tk.X, padx=30, pady=5)
 tk.Button(login, text="❓ Mot de passe oublié / Réinitialiser", font=("Helvetica", 9, "underline"), bg="#1e293b", fg="#94a3b8", bd=0, command=recuperer_mot_de_passe_oublie, cursor="hand2").pack(pady=5)
 
+# --- ENCADREMENT BAS DE LA PAGE DE CONNEXION ---
 cadre_bas = tk.Frame(login, bg="#1e293b")
 cadre_bas.pack(fill=tk.X, side=tk.BOTTOM, padx=15, pady=10)
 
-# 🟢 ENREGISTREMENT ET RE-ANCRAGE DU BOUTON ORANGE
-btn_abonnement = tk.Button(cadre_bas, text="💳 PAYER ABONNEMENT", font=("Helvetica", 8, "bold", "underline"), bg="#1e293b", fg="#f59e0b", bd=0, cursor="hand2", command=ouvrir_fenetre_paiement)
+def action_ouvrir_support_manuel():
+    """Ouvre une fenêtre pop-up propre affichant les coordonnées de l'ingénieur pour activation manuelle."""
+    pop_support = Toplevel(login)
+    pop_support.title("📞 Activation Manuelle & Support Technique")
+    pop_support.geometry("380x250")
+    pop_support.configure(bg="#1e293b")
+    pop_support.resizable(False, False)
+    pop_support.grab_set()
+
+    tk.Label(pop_support, text="SUPPORT TECHNIQUE KASHKEEPER", font=("Helvetica", 10, "bold"), bg="#1e293b", fg="#cbd5e1").pack(pady=10)
+    
+    # Message d'explication clair pour le gérant
+    texte_rh = "NOTRE passerelle de paiement automatisée est en cours de maintenance réglementaire.\n\nPour renouveller manuellement votre abonnement mensuel (14 000 FCFA), veuillez utiliser l'un des contacts suivant:"
+    tk.Label(pop_support, text=texte_rh, font=("Helvetica", 9), bg="#1e293b", fg="#94a3b8", wrap=340, justify=tk.CENTER).pack(padx=15, pady=5)
+
+    # Coordonnées réelles à afficher (À adapter avec tes vrais numéros)
+    tk.Label(pop_support, text="📱 Téléphone / WhatsApp : +237 6 86 08 15 12 | 683 10 63 38 ", font=("Helvetica", 10, "bold"), bg="#1e293b", fg="#f59e0b").pack(pady=2)
+    tk.Label(pop_support, text="✉️ E-mail d'audit : zidaneserges@gmail.com", font=("Helvetica", 10, "bold"), bg="#1e293b", fg="#3b82f6").pack(pady=2)
+
+    tk.Button(pop_support, text="❌ FERMER", font=("Helvetica", 9, "bold"), bg="#dc2626", fg="white", bd=0, command=pop_support.destroy, padx=10, pady=4).pack(pady=15)
+
+# 🟢 AJOUTÉ : Le petit bouton Contact à l'extrême inférieur GAUCHE
+btn_contact = tk.Button(
+    cadre_bas, 
+    text="📞 CONTACT SUPPORT", 
+    font=("Helvetica", 8, "bold", "underline"), 
+    bg="#1e293b", 
+    fg="#94a3b8", 
+    bd=0, 
+    cursor="hand2", 
+    command=action_ouvrir_support_manuel
+)
+btn_contact.pack(side=tk.LEFT)
+
+# Le bouton orange de renouvellement de licence reste à l'extrême DROITE (Masqué ou inactif selon tes besoins)
+btn_abonnement = tk.Button(
+    cadre_bas, 
+    text="💳 PAYER ABONNEMENT", 
+    font=("Helvetica", 8, "bold", "underline"), 
+    bg="#1e293b", 
+    fg="#f59e0b", 
+    bd=0, 
+    cursor="hand2", 
+    command=ouvrir_fenetre_paiement
+)
 btn_abonnement.pack(side=tk.RIGHT)
 
 # Allumage officiel du logiciel d'usine

@@ -277,6 +277,17 @@ def api_reception_webhook_campay(payload: dict):
         conn.close()
         return {"status": "Mis à jour"}
     return {"status": "Ignoré"}
+
+
+@app.get("/serge/generer-cle-secrete")
+def api_generateur_cle_telephone(cle_client: str, mois: int, annee: int):
+    """Route secrète permettant à Serges de générer les clés WhatsApp d'usine depuis son smartphone."""
+    import hashlib
+    sel_secret = f"{cle_client.strip()}-{mois}-{annee}-KASHKEEPER-SERGE"
+    signature_unitaire = hashlib.md5(sel_secret.encode("utf-8")).hexdigest().upper()[:8]
+    code_final = f"KASH-{signature_unitaire[:4]}-{signature_unitaire[4:]}"
+    return {"code_whatsapp_a_envoyer": code_final}
+
 # =====================================================================
 # FIN ABSOLUE DU CODE DU SERVEUR CLOUD RENDER - KASHFLOW ENGINE v6.0
 # =====================================================================
