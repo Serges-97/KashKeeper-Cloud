@@ -373,15 +373,26 @@ def page_generateur_visuel_smartphone():
             <div class="form-group">
                 <label>MOIS DE CIBLE :</label>
                 <select id="mois">
-                    {"".join(f'<option value="{i}" {"selected" if i==mois_actuel else ""}>{str(i).zfill(2)}</option>' for i in range(1, 13))}
+                    <option value="1">01</option>
+                    <option value="2">02</option>
+                    <option value="3">03</option>
+                    <option value="4">04</option>
+                    <option value="5">05</option>
+                    <option value="6">06</option>
+                    <option value="7">07</option>
+                    <option value="8">08</option>
+                    <option value="9">09</option>
+                    <option value="10" selected>10</option>
+                    <option value="11">11</option>
+                    <option value="12">12</option>
                 </select>
             </div>
             
             <div class="form-group">
                 <label>ANNÉE :</label>
                 <select id="annee">
-                    <option value="2026" {"selected" if annee_actuelle==2026 else ""}>2026</option>
-                    <option value="2027" {"selected" if annee_actuelle==2027 else ""}>2027</option>
+                    <option value="2026" selected>2026</option>
+                    <option value="2027">2027</option>
                     <option value="2028">2028</option>
                 </select>
             </div>
@@ -406,7 +417,6 @@ def page_generateur_visuel_smartphone():
                     return;
                 }}
                 
-                // Formule de hachage synchronisée à 100% avec l'application Tkinter
                 const sel = cle + "-" + m + "-" + a + "-KASHKEEPER-SERGE";
                 const hash = CryptoJS.MD5(sel).toString().toUpperCase().substring(0, 8);
                 const codeFinal = "KASH-" + hash.substring(0, 4) + "-" + hash.substring(4, 8);
@@ -419,7 +429,3 @@ def page_generateur_visuel_smartphone():
     </html>
     """
     return HTMLResponse(content=html_content, status_code=200)
-
-# =====================================================================
-# FIN ABSOLUE DU CODE DU SERVEUR CLOUD RENDER - KASHFLOW ENGINE v6.0
-# =====================================================================
