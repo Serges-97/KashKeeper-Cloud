@@ -391,14 +391,6 @@ def page_generateur_visuel_smartphone():
                     <option value="2028">2028</option>
                     <option value="2029">2029</option>
                     <option value="2030">2030</option>
-                    <option value="2031">2031</option>
-                    <option value="2032">2032</option>
-                    <option value="2033">2033</option>
-                    <option value="2034">2034</option>
-                    <option value="2035">2035</option>
-                    <option value="2036">2036</option>
-                    <option value="2037">2037</option>
-                    <option value="2038">2038</option>
                 </select>
             </div>
             
@@ -411,9 +403,45 @@ def page_generateur_visuel_smartphone():
         </div>
 
         <script>
-            // 🟢 CODE ALGORITHMIQUE MD5 PUR INTÉGRÉ (Aucune dépendance externe, 100% compatible)
             function md5(string) {
-                function k(b,c,l,m,s,i,a){return h(c^l^m,b,c,s,i,a)}function g(b,c,l,m,s,i,a){return h(c&m|l&~m,b,c,s,i,a)}function f(b,c,l,m,s,i,a){return h(b&c|~b&l,b,c,s,i,a)}function h(b,c,l,m,s,i){b=add(add(b,c),add(m,i));return add(b<<s|b>>>32-s,l)}function add(b,c){var l=(b&65535)+(c&65535);return(b>>16)+(c>>16)+(l>>16)<<16|l&65535}var x=function(b){var c,l=b.length,m=[1732584193,-271733879,-1732584194,271733878],s;for(c=64;c<=b.length;c+=64);var i=new Array(c);for(s=0;s<c;s++)i[s]=0;for(s=0;s<l;s++)i[s>>2]|=b.charCodeAt(s)<<s%4*8;i[s>>2]|=128<<s%4*8;i[c-8]=l*8;var a=m[0],e=m[1],j=m[2],d=m[3];for(c=0;c<i.length;c+=16){var n=a,o=e,p=j,q=d;a=f(a,e,j,d,i[c+0],7,-680876936);d=f(d,a,e,j,i[c+1],12,-389564586);j=f(j,d,a,e,i[c+2],17,606105819);e=f(e,j,d,a,i[c+3],22,-1044525330);a=f(a,e,j,d,i[c+4],7,-176418897);d=f(d,a,e,j,i[c+5],12,1200080426);j=f(j,d,a,e,i[c+6],17,-1473231341);e=f(e,j,d,a,i[c+7],22,-45705983);a=f(a,e,j,d,i[c+8],7,1770035416);d=f(d,a,e,j,i[c+9],12,-1958414417);j=f(j,d,a,e,i[c+10],17,-42063);e=f(e,j,d,a,i[c+11],22,-1990404162);a=f(a,e,j,d,i[c+12],7,1804603682);d=f(d,a,e,j,i[c+13],12,-40341101);j=f(j,d,a,e,i[c+14],17,-1502002290);e=f(e,j,d,a,i[c+15],22,1236535329);a=g(a,e,j,d,i[c+1],5,-165796510);d=g(d,a,e,j,i[c+6],9,-1069501632);j=g(j,d,a,e,i[c+11],14,643717713);e=g(e,j,d,a,i[c+0],20,-373897302);a=g(a,e,j,d,i[c+5],5,-701558691);d=g(d,a,e,j,i[c+10],9,38016083);j=g(j,d,a,e,i[c+15],14,-660478335);e=g(e,j,d,a,i[c+4],20,-405537848);a=g(a,e,j,d,i[c+9],5,568446438);d=g(d,a,e,j,i[c+14],9,-1019803690);j=g(j,d,a,e,i[c+3],14,-187363961);e=g(e,j,d,a,i[c+8],20,1163531501);a=g(a,e,j,d,i[c+13],5,-1444681467);d=g(d,a,e,j,i[c+2],9,-51403784);j=g(j,d,a,e,i[c+7],14,1735328473);e=g(e,j,d,a,i[c+12],20,-1926607734);a=k(a,e,j,d,i[c+5],4,-378558);d=k(d,a,e,j,i[c+8],11,-2022574463);j=k(j,d,a,e,i[c+11],16,1839030562);e=k(e,j,d,a,i[c+14],23,-35309556);a=k(a,e,j,d,i[c+1],4,-1530992060);d=k(d,a,e,j,i[c+4],11,1272893353);j=k(j,d,a,e,i[c+7],16,-155497632);e=k(e,j,d,a,i[c+10],23,-1094730640);a=k(a,e,j,d,i[c+13],4,681279174);d=k(d,a,e,j,i[c+0],11,-358537222);j=k(j,d,a,e,i[c+3],16,-722521979);e=k(e,j,d,a,i[c+6],23,76029189);a=k(a,e,j,d,i[c+9],4,-640364487);d=k(d,a,e,j,i[c+12],11,-421815835);j=k(j,d,a,e,i[c+15],16,530742520);e=k(e,j,d,a,i[c+2],23,-995338651);a=h(e^(j|~d),a,e,i[c+0],6,-198630844);d=h(j^(a|~e),d,a,i[c+7],10,1126891415);j=h(a^(d|~j),j,d,i[c+14],15,-1416354905);e=h(d^(j|~a),e,j,i[c+5],21,-57434055);a=h(j^(e|~d),a,e,i[c+12],6,1700485571);d=h(e^(a|~j),d,a,i[c+3],10,-1894986606);j=h(a^(d|~e),j,d,i[c+10],15,-1051523);e=h(d^(j|~a),e,j,i[c+1],21,-2054922799);a=h(j^(e|~d),a,e,i[c+8],6,1873313359);d=h(e^(a|~j),d,a,i[c+15],10,-30611744);j=h(a^(d|~e),j,d,i[c+6],15,-1560198380);e=h(d^(j|~a),e,j,i[c+13],21,1309151649);a=h(j^(e|~d),a,e,i[c+4],6,-145523070);d=h(e^(a|~j),d,a,i[c+11],10,-1120210379);j=h(a^(d|~e),j,d,i[c+2],15,718787281);e=h(d^(j|~a),e,j,i[c+9],21,-343485551);a=add(a,n);e=add(e,o);j=add(j,p);d=add(d,q)}return[a,e,j,d]};function r(b){var c="",l=b.length,m="0123456789ABCDEF",s;for(s=0;s<l;s++)c+=m.charAt(b[s]>>>4&15)+m.charAt(b[s]&15);return c}var h="0123456789ABCDEF";return r(x(string));
+                function k(b,c,l,m,s,i,a){return h(c^l^m,b,c,s,i,a)}
+                function g(b,c,l,m,s,i,a){return h(c&m|l&~m,b,c,s,i,a)}
+                function f(b,c,l,m,s,i,a){return h(b&c|~b&l,b,c,s,i,a)}
+                function h(b,c,l,m,s,i,a){b=add(add(b,c),add(m,a));return add(b<<s|b>>>32-s,l)}
+                function add(b,c){var l=(b&65535)+(c&65535);return(b>>16)+(c>>16)+(l>>16)<<16|l&65535}
+                
+                var c, l=string.length, m_init=[1732584193,-271733879,-1732584194,271733878], s;
+                for(c=64;c<=string.length;c+=64);
+                var i=new Array(c);
+                for(s=0;s<c;s++)i[s]=0;
+                for(s=0;s<l;s++)i[s>>2]|=string.charCodeAt(s)<<s%4*8;
+                i[s>>2]|=128<<s%4*8;
+                i[c-8]=l*8;
+                
+                # 🟢 CORRIGÉ : Utilisation de m_init pour éviter l'écrasement de boucle JavaScript
+                var a=m_init[0], e=m_init[1], j=m_init[2], d=m_init[3];
+                for(c=0;c<i.length;c+=16){
+                    var n=a,o=e,p=j,q=d;
+                    a=f(a,e,j,d,i[c+0],7,-680876936);d=f(d,a,e,j,i[c+1],12,-389564586);j=f(j,d,a,e,i[c+2],17,606105819);e=f(e,j,d,a,i[c+3],22,-1044525330);
+                    a=f(a,e,j,d,i[c+4],7,-176418897);d=f(d,a,e,j,i[c+5],12,1200080426);j=f(j,d,a,e,i[c+6],17,-1473231341);e=f(e,j,d,a,i[c+7],22,-45705983);
+                    a=f(a,e,j,d,i[c+8],7,1770035416);d=f(d,a,e,j,i[c+9],12,-1958414417);j=f(j,d,a,e,i[c+10],17,-42063);e=f(e,j,d,a,i[c+11],22,-1990404162);
+                    a=f(a,e,j,d,i[c+12],7,1804603682);d=f(d,a,e,j,i[c+13],12,-40341101);j=f(j,d,a,e,i[c+14],17,-1502002290);e=f(e,j,d,a,i[c+15],22,1236535329);
+                    a=g(a,e,j,d,i[c+1],5,-165796510);d=g(d,a,e,j,i[c+6],9,-1069501632);j=g(j,d,a,e,i[c+11],14,643717713);e=g(e,j,d,a,i[c+0],20,-373897302);
+                    a=g(a,e,j,d,i[c+5],5,-701558691);d=g(d,a,e,j,i[c+10],9,38016083);j=g(j,d,a,e,i[c+15],14,-660478335);e=g(e,j,d,a,i[c+4],20,-405537848);
+                    a=g(a,e,j,d,i[c+9],5,568446438);d=g(d,a,e,j,i[c+14],9,-1019803690);j=g(j,d,a,e,i[c+3],14,-187363961);e=g(e,j,d,a,i[c+8],20,1163531501);
+                    a=g(a,e,j,d,i[c+13],5,-1444681467);d=g(d,a,e,j,i[c+2],9,-51403784);j=g(j,d,a,e,i[c+7],14,1735328473);e=g(e,j,d,a,i[c+12],20,-1926607734);
+                    a=k(a,e,j,d,i[c+5],4,-378558);d=k(d,a,e,j,i[c+8],11,-2022574463);j=k(j,d,a,e,i[c+11],16,1839030562);e=k(e,j,d,a,i[c+14],23,-35309556);
+                    a=k(a,e,j,d,i[c+1],4,-1530992060);d=k(d,a,e,j,i[c+4],11,1272893353);j=k(j,d,a,e,i[c+7],16,-155497632);e=k(e,j,d,a,i[c+10],23,-1094730640);
+                    a=k(a,e,j,d,i[c+13],4,681279174);d=k(d,a,e,j,i[c+0],11,-358537222);j=k(j,d,a,e,i[c+3],16,-722521979);e=k(e,j,d,a,i[c+6],23,76029189);
+                    a=k(a,e,j,d,i[c+9],4,-640364487);d=k(d,a,e,j,i[c+12],11,-421815835);j=k(j,d,a,e,i[c+15],16,530742520);e=k(e,j,d,a,i[c+2],23,-995338651);
+                    a=h(e^(j|~d),a,e,i[c+0],6,-198630844);d=h(j^(a|~e),d,a,i[c+7],10,1126891415);j=h(a^(d|~j),j,d,i[c+14],15,-1416354905);e=h(d^(j|~a),e,j,i[c+5],21,-57434055);
+                    a=h(j^(e|~d),a,e,i[c+12],6,1700485571);d=h(e^(a|~j),d,a,i[c+3],10,-1894986606);j=h(a^(d|~e),j,d,i[c+10],15,-1051523);e=h(d^(j|~a),e,j,i[c+1],21,-2054922799);
+                    a=h(j^(e|~d),a,e,i[c+8],6,1873313359);d=h(e^(a|~j),d,a,i[c+15],10,-30611744);j=h(a^(d|~e),j,d,i[c+6],15,-1560198380);e=h(d^(j|~a),e,j,i[c+13],21,1309151649);
+                    a=h(j^(e|~d),a,e,i[c+4],6,-145523070);d=h(e^(a|~j),d,a,i[c+11],10,-1120210379);j=h(a^(d|~e),j,d,i[c+2],15,718787281);e=h(d^(j|~a),e,j,i[c+9],21,-343485551);
+                    a=add(a,n);e=add(e,o);j=add(j,p);d=add(d,q);
+                }
+                function r(b){var c="",l=b.length,m_hex="0123456789ABCDEF",s;for(s=0;s<l;s++)c+=m_hex.charAt(b[s]>>>4&15)+m_hex.charAt(b[s]&15);return c}
+                return r([a,e,j,d]);
             }
 
             function calculerCleLocale() {
@@ -426,7 +454,6 @@ def page_generateur_visuel_smartphone():
                     return;
                 }
                 
-                // Exécute le calcul MD5 pur interne (Réseau sécurisé Cloud)
                 var sel = cle + "-" + m + "-" + a + "-KASHKEEPER-SERGE";
                 var hash = md5(sel);
                 var codeFinal = "KASH-" + hash.substring(0, 4) + "-" + hash.substring(4, 8);
