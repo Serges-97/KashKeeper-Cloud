@@ -278,15 +278,147 @@ def api_reception_webhook_campay(payload: dict):
         return {"status": "Mis à jour"}
     return {"status": "Ignoré"}
 
+from fastapi.responses import HTMLResponse
 
-@app.get("/serge/generer-cle-secrete")
-def api_generateur_cle_telephone(cle_client: str, mois: int, annee: int):
-    """Route secrète permettant à Serges de générer les clés WhatsApp d'usine depuis son smartphone."""
-    import hashlib
-    sel_secret = f"{cle_client.strip()}-{mois}-{annee}-KASHKEEPER-SERGE"
-    signature_unitaire = hashlib.md5(sel_secret.encode("utf-8")).hexdigest().upper()[:8]
-    code_final = f"KASH-{signature_unitaire[:4]}-{signature_unitaire[4:]}"
-    return {"code_whatsapp_a_envoyer": code_final}
+@app.get("/serge/generateur", response_class=HTMLResponse)
+def page_generateur_visuel_smartphone():
+    """Génère une interface web mobile d'usine pour que Serges crée ses clés sans manipuler les URL."""
+    import datetime
+    maintenant = datetime.datetime.now()
+    mois_actuel = maintenant.month
+    annee_actuelle = maintenant.year
+
+    html_content = f"""
+    <!DOCTYPE html>
+    <html lang="fr">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>🛠️ KashKeeper - Support VIP</title>
+        <style>
+            body {{
+                font-family: 'Segoe UI', Helvetica, Arial, sans-serif;
+                background-color: #0f172a;
+                color: #cbd5e1;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                height: 100vh;
+                margin: 0;
+                padding: 10px;
+                box-sizing: border-box;
+            }}
+            .card {{
+                background-color: #1e293b;
+                padding: 25px;
+                border-radius: 12px;
+                box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+                width: 100%;
+                max-width: 360px;
+                text-align: center;
+            }}
+            h2 {{ color: #f59e0b; margin-top: 0; font-size: 1.3rem; letter-spacing: 0.5px; }}
+            p {{ color: #94a3b8; font-size: 0.85rem; margin-bottom: 20px; }}
+            .form-group {{ text-align: left; margin-bottom: 15px; }}
+            label {{ display: block; font-size: 0.8rem; font-weight: bold; margin-bottom: 5px; color: #cbd5e1; }}
+            input, select {{
+                width: 100%;
+                padding: 10px;
+                background-color: #0f172a;
+                border: 1px solid #475569;
+                border-radius: 6px;
+                color: white;
+                font-size: 0.95rem;
+                font-weight: bold;
+                box-sizing: border-box;
+                text-align: center;
+            }}
+            input:focus, select:focus {{ border-color: #3b82f6; outline: none; }}
+            .btn {{
+                width: 100%;
+                padding: 12px;
+                background-color: #f59e0b;
+                border: none;
+                border-radius: 6px;
+                color: #0f172a;
+                font-size: 1rem;
+                font-weight: bold;
+                cursor: pointer;
+                margin-top: 10px;
+                transition: background 0.2s;
+            }}
+            .btn:hover {{ background-color: #d97706; }}
+            .result-box {{
+                margin-top: 20px;
+                padding: 12px;
+                background-color: #0f172a;
+                border: 2px dashed #10b981;
+                border-radius: 6px;
+                display: none;
+            }}
+            .result-title {{ font-size: 0.75rem; color: #10b981; font-weight: bold; margin-bottom: 5px; }}
+            .result-code {{ font-size: 1.4rem; color: #ffffff; font-weight: bold; letter-spacing: 1px; font-family: monospace; }}
+        </style>
+    </head>
+    <body>
+        <div class="card">
+            <h2>KASHKEEPER MANAGER</h2>
+            <p>Générateur d'Activation Manuelle SaaS</p>
+            
+            <div class="form-group">
+                <label>ID OU CLÉ DU CLIENT :</label>
+                <input type="text" id="cle_client" value="SERGE_TECH_998877" placeholder="Ex: BOUTIQUE_DOUALA">
+            </div>
+            
+            <div class="form-group">
+                <label>MOIS DE CIBLE :</label>
+                <select id="mois">
+                    {"".join(f'<option value="{i}" {"selected" if i==mois_actuel else ""}>{str(i).zfill(2)}</option>' for i in range(1, 13))}
+                </select>
+            </div>
+            
+            <div class="form-group">
+                <label>ANNÉE :</label>
+                <select id="annee">
+                    <option value="2026" {"selected" if annee_actuelle==2026 else ""}>2026</option>
+                    <option value="2027" {"selected" if annee_actuelle==2027 else ""}>2027</option>
+                    <option value="2028">2028</option>
+                </select>
+            </div>
+            
+            <button class="btn" onclick="calculerCleLocale()">⚡ GÉNÉRER LA CLÉ SAAS</button>
+            
+            <div class="result-box" id="bloc_resultat">
+                <div class="result-title">🔑 CODE WHATSAPP À ENVOYER :</div>
+                <div class="result-code" id="code_affichage">KASH-XXXX-XXXX</div>
+            </div>
+        </div>
+
+        <script src="https://cloudflare.com"></script>
+        <script>
+            function calculerCleLocale() {{
+                const cle = document.getElementById('cle_client').value.trim();
+                const m = document.getElementById('mois').value;
+                const a = document.getElementById('annee').value;
+                
+                if(!cle) {{
+                    alert("Veuillez saisir l'identifiant du client.");
+                    return;
+                }}
+                
+                // Formule de hachage synchronisée à 100% avec l'application Tkinter
+                const sel = cle + "-" + m + "-" + a + "-KASHKEEPER-SERGE";
+                const hash = CryptoJS.MD5(sel).toString().toUpperCase().substring(0, 8);
+                const codeFinal = "KASH-" + hash.substring(0, 4) + "-" + hash.substring(4, 8);
+                
+                document.getElementById('code_affichage').innerText = codeFinal;
+                document.getElementById('bloc_resultat').style.display = 'block';
+            }}
+        </script>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html_content, status_code=200)
 
 # =====================================================================
 # FIN ABSOLUE DU CODE DU SERVEUR CLOUD RENDER - KASHFLOW ENGINE v6.0
