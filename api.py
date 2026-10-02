@@ -283,12 +283,8 @@ from fastapi.responses import HTMLResponse
 @app.get("/serge/generateur", response_class=HTMLResponse)
 def page_generateur_visuel_smartphone():
     """Génère une interface web mobile d'usine pour que Serges crée ses clés sans manipuler les URL."""
-    import datetime
-    maintenant = datetime.datetime.now()
-    mois_actuel = maintenant.month
-    annee_actuelle = maintenant.year
-
-    html_content = f"""
+    # 🟢 CORRIGÉ : Chaîne de texte brute triple guillemets sans le 'f' devant pour éviter le conflit d'accolades Python/JS
+    html_content = """
     <!DOCTYPE html>
     <html lang="fr">
     <head>
@@ -296,7 +292,7 @@ def page_generateur_visuel_smartphone():
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>🛠️ KashKeeper - Support VIP</title>
         <style>
-            body {{
+            body {
                 font-family: 'Segoe UI', Helvetica, Arial, sans-serif;
                 background-color: #0f172a;
                 color: #cbd5e1;
@@ -307,8 +303,8 @@ def page_generateur_visuel_smartphone():
                 margin: 0;
                 padding: 10px;
                 box-sizing: border-box;
-            }}
-            .card {{
+            }
+            .card {
                 background-color: #1e293b;
                 padding: 25px;
                 border-radius: 12px;
@@ -316,12 +312,12 @@ def page_generateur_visuel_smartphone():
                 width: 100%;
                 max-width: 360px;
                 text-align: center;
-            }}
-            h2 {{ color: #f59e0b; margin-top: 0; font-size: 1.3rem; letter-spacing: 0.5px; }}
-            p {{ color: #94a3b8; font-size: 0.85rem; margin-bottom: 20px; }}
-            .form-group {{ text-align: left; margin-bottom: 15px; }}
-            label {{ display: block; font-size: 0.8rem; font-weight: bold; margin-bottom: 5px; color: #cbd5e1; }}
-            input, select {{
+            }
+            h2 { color: #f59e0b; margin-top: 0; font-size: 1.3rem; letter-spacing: 0.5px; }
+            p { color: #94a3b8; font-size: 0.85rem; margin-bottom: 20px; }
+            .form-group { text-align: left; margin-bottom: 15px; }
+            label { display: block; font-size: 0.8rem; font-weight: bold; margin-bottom: 5px; color: #cbd5e1; }
+            input, select {
                 width: 100%;
                 padding: 10px;
                 background-color: #0f172a;
@@ -332,9 +328,9 @@ def page_generateur_visuel_smartphone():
                 font-weight: bold;
                 box-sizing: border-box;
                 text-align: center;
-            }}
-            input:focus, select:focus {{ border-color: #3b82f6; outline: none; }}
-            .btn {{
+            }
+            input:focus, select:focus { border-color: #3b82f6; outline: none; }
+            .btn {
                 width: 100%;
                 padding: 12px;
                 background-color: #f59e0b;
@@ -346,18 +342,18 @@ def page_generateur_visuel_smartphone():
                 cursor: pointer;
                 margin-top: 10px;
                 transition: background 0.2s;
-            }}
-            .btn:hover {{ background-color: #d97706; }}
-            .result-box {{
+            }
+            .btn:hover { background-color: #d97706; }
+            .result-box {
                 margin-top: 20px;
                 padding: 12px;
                 background-color: #0f172a;
                 border: 2px dashed #10b981;
                 border-radius: 6px;
                 display: none;
-            }}
-            .result-title {{ font-size: 0.75rem; color: #10b981; font-weight: bold; margin-bottom: 5px; }}
-            .result-code {{ font-size: 1.4rem; color: #ffffff; font-weight: bold; letter-spacing: 1px; font-family: monospace; }}
+            }
+            .result-title { font-size: 0.75rem; color: #10b981; font-weight: bold; margin-bottom: 5px; }
+            .result-code { font-size: 1.4rem; color: #ffffff; font-weight: bold; letter-spacing: 1px; font-family: monospace; }
         </style>
     </head>
     <body>
@@ -373,27 +369,27 @@ def page_generateur_visuel_smartphone():
             <div class="form-group">
                 <label>MOIS DE CIBLE :</label>
                 <select id="mois">
-                    <option value="1" {"selected" if mois_actuel == 1 else ""}>01</option>
-                    <option value="2" {"selected" if mois_actuel == 2 else ""}>02</option>
-                    <option value="3" {"selected" if mois_actuel == 3 else ""}>03</option>
-                    <option value="4" {"selected" if mois_actuel == 4 else ""}>04</option>
-                    <option value="5" {"selected" if mois_actuel == 5 else ""}>05</option>
-                    <option value="6" {"selected" if mois_actuel == 6 else ""}>06</option>
-                    <option value="7" {"selected" if mois_actuel == 7 else ""}>07</option>
-                    <option value="8" {"selected" if mois_actuel == 8 else ""}>08</option>
-                    <option value="9" {"selected" if mois_actuel == 9 else ""}>09</option>
-                    <option value="10" {"selected" if mois_actuel == 10 else ""}>10</option>
-                    <option value="11" {"selected" if mois_actuel == 11 else ""}>11</option>
-                    <option value="12" {"selected" if mois_actuel == 12 else ""}>12</option>
+                    <option value="1">01</option>
+                    <option value="2">02</option>
+                    <option value="3">03</option>
+                    <option value="4">04</option>
+                    <option value="5">05</option>
+                    <option value="6">06</option>
+                    <option value="7">07</option>
+                    <option value="8">08</option>
+                    <option value="9">09</option>
+                    <option value="10" selected>10</option>
+                    <option value="11">11</option>
+                    <option value="12">12</option>
                 </select>
             </div>
             
             <div class="form-group">
                 <label>ANNÉE :</label>
                 <select id="annee">
-                    <option value="2026" {"selected" if annee_actuelle == 2026 else ""}>2026</option>
-                    <option value="2027" {"selected" if annee_actuelle == 2027 else ""}>2027</option>
-                    <option value="2028" {"selected" if annee_actuelle == 2028 else ""}>2028</option>
+                    <option value="2026" selected>2026</option>
+                    <option value="2027">2027</option>
+                    <option value="2028">2028</option>
                 </select>
             </div>
             
@@ -405,26 +401,27 @@ def page_generateur_visuel_smartphone():
             </div>
         </div>
 
-        <!-- Inclusion du CDN sécurisé pour charger le décodeur MD5 d'usine -->
+        <!-- Chargement de la bibliothèque d'usine Crypto-JS via CDN pour l'empreinte MD5 -->
         <script src="https://cloudflare.com"></script>
         <script>
-            function calculerCleLocale() {{
+            function calculerCleLocale() {
                 const cle = document.getElementById('cle_client').value.trim();
                 const m = document.getElementById('mois').value;
                 const a = document.getElementById('annee').value;
                 
-                if(!cle) {{
+                if(!cle) {
                     alert("Veuillez saisir l'identifiant du client.");
                     return;
-                }}
+                }
                 
+                // Calcul cryptographique identique à l'application locale
                 const sel = cle + "-" + m + "-" + a + "-KASHKEEPER-SERGE";
                 const hash = CryptoJS.MD5(sel).toString().toUpperCase().substring(0, 8);
                 const codeFinal = "KASH-" + hash.substring(0, 4) + "-" + hash.substring(4, 8);
                 
                 document.getElementById('code_affichage').innerText = codeFinal;
                 document.getElementById('bloc_resultat').style.display = 'block';
-            }}
+            }
         </script>
     </body>
     </html>
