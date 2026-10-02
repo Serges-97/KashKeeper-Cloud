@@ -11,7 +11,9 @@ from datetime import datetime, timedelta
 from pydantic import BaseModel
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse
+
 
 DOSSIER_DU_FICHIER = os.path.dirname(os.path.abspath(__file__))
 if DOSSIER_DU_FICHIER not in sys.path:
