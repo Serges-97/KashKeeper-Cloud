@@ -281,9 +281,44 @@ def api_reception_webhook_campay(payload: dict):
     return {"status": "Ignoré"}
 
 @app.get("/serge/generateur", response_class=HTMLResponse)
-def page_generateur_visuel_smartphone():
-    """Génère une interface web mobile d'usine propre pour que Serges crée ses clés de manière 100% autonome."""
-    html_content = """
+def page_generateur_visuel_en_dur(cle_client: str = None, mois: int = None, annee: int = None):
+    """Génère l'interface web mobile et calcule la clé d'activation EN DUR en Python pur."""
+    import hashlib
+    import datetime
+    
+    maintenant = datetime.datetime.now()
+    mois_par_defaut = mois if mois is not None else maintenant.month
+    annee_par_defaut = annee if annee is not None else maintenant.year
+    cle_par_defaut = cle_client.strip() if cle_client else "SERGE_TECH_998877"
+    
+    code_genere_html = ""
+    
+    # 🟢 CALCUL EN DUR : Si les données sont soumises, Python calcule directement la clé
+    if cle_client and mois and annee:
+        sel_secret = f"{cle_client.strip()}-{mois}-{annee}-KASHKEEPER-SERGE"
+        signature_unitaire = hashlib.md5(sel_secret.encode("utf-8")).hexdigest().upper()[:8]
+        code_final = f"KASH-{signature_unitaire[:4]}-{signature_unitaire[4:]}"
+        
+        code_genere_html = f"""
+        <div style="margin-top: 20px; padding: 12px; background-color: #0f172a; border: 2px dashed #10b981; border-radius: 6px;">
+            <div style="font-size: 0.75rem; color: #10b981; font-weight: bold; margin-bottom: 5px;">🔑 CODE WHATSAPP À ENVOYER :</div>
+            <div style="font-size: 1.4rem; color: #ffffff; font-weight: bold; letter-spacing: 1px; font-family: monospace;">{code_final}</div>
+        </div>
+        """
+
+    # Génération des options du menu déroulant des mois
+    options_mois = ""
+    for i in range(1, 13):
+        selected = "selected" if i == int(mois_par_defaut) else ""
+        options_mois += f'<option value="{i}" {selected}>{str(i).zfill(2)}</option>'
+
+    # Génération des options du menu déroulant des années
+    options_annees = ""
+    for a in range (2026,2035): 
+        selected = "selected" if a == int(annee_par_defaut) else ""
+        options_annees += f'<option value="{a}" {selected}>{a}</option>'
+
+    html_content = f""" 
     <!DOCTYPE html>
     <html lang="fr">
     <head>
@@ -291,7 +326,7 @@ def page_generateur_visuel_smartphone():
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>🛠️ KashKeeper - Support VIP</title>
         <style>
-            body {
+            body {{
                 font-family: 'Segoe UI', Helvetica, Arial, sans-serif;
                 background-color: #0f172a;
                 color: #cbd5e1;
@@ -302,8 +337,8 @@ def page_generateur_visuel_smartphone():
                 margin: 0;
                 padding: 10px;
                 box-sizing: border-box;
-            }
-            .card {
+            }}
+            .card {{
                 background-color: #1e293b;
                 padding: 25px;
                 border-radius: 12px;
@@ -311,12 +346,12 @@ def page_generateur_visuel_smartphone():
                 width: 100%;
                 max-width: 360px;
                 text-align: center;
-            }
-            h2 { color: #f59e0b; margin-top: 0; font-size: 1.3rem; letter-spacing: 0.5px; }
-            p { color: #94a3b8; font-size: 0.85rem; margin-bottom: 20px; }
-            .form-group { text-align: left; margin-bottom: 15px; }
-            label { display: block; font-size: 0.8rem; font-weight: bold; margin-bottom: 5px; color: #cbd5e1; }
-            input, select {
+            }}
+            h2 {{ color: #f59e0b; margin-top: 0; font-size: 1.3rem; letter-spacing: 0.5px; }}
+            p {{ color: #94a3b8; font-size: 0.85rem; margin-bottom: 20px; }}
+            .form-group {{ text-align: left; margin-bottom: 15px; }}
+            label {{ display: block; font-size: 0.8rem; font-weight: bold; margin-bottom: 5px; color: #cbd5e1; }}
+            input, select {{
                 width: 100%;
                 padding: 10px;
                 background-color: #0f172a;
@@ -327,9 +362,8 @@ def page_generateur_visuel_smartphone():
                 font-weight: bold;
                 box-sizing: border-box;
                 text-align: center;
-            }
-            input:focus, select:focus { border-color: #3b82f6; outline: none; }
-            .btn {
+            }}
+            .btn {{
                 width: 100%;
                 padding: 12px;
                 background-color: #f59e0b;
@@ -340,19 +374,7 @@ def page_generateur_visuel_smartphone():
                 font-weight: bold;
                 cursor: pointer;
                 margin-top: 10px;
-                transition: background 0.2s;
-            }
-            .btn:hover { background-color: #d97706; }
-            .result-box {
-                margin-top: 20px;
-                padding: 12px;
-                background-color: #0f172a;
-                border: 2px dashed #10b981;
-                border-radius: 6px;
-                display: none;
-            }
-            .result-title { font-size: 0.75rem; color: #10b981; font-weight: bold; margin-bottom: 5px; }
-            .result-code { font-size: 1.4rem; color: #ffffff; font-weight: bold; letter-spacing: 1px; font-family: monospace; }
+            }}
         </style>
     </head>
     <body>
@@ -360,109 +382,34 @@ def page_generateur_visuel_smartphone():
             <h2>KASHKEEPER MANAGER</h2>
             <p>Générateur d'Activation Manuelle SaaS</p>
             
-            <div class="form-group">
-                <label>ID OU CLÉ DU CLIENT :</label>
-                <input type="text" id="cle_client" value="SERGE_TECH_998877" placeholder="Ex: BOUTIQUE_DOUALA">
-            </div>
+            <!-- Formulier d'action natif qui recharge la page en dur -->
+            <form action="/serge/generateur" method="get">
+                <div class="form-group">
+                    <label>ID OU CLÉ DU CLIENT :</label>
+                    <input type="text" name="cle_client" value="{cle_par_defaut}" required>
+                </div>
+                
+                <div class="form-group">
+                    <label>MOIS DE CIBLE :</label>
+                    <select name="mois">
+                        {options_mois}
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label>ANNÉE :</label>
+                    <select name="annee">
+                        {options_annees}
+                    </select>
+                </div>
+                
+                <button type="submit" class="btn">⚡ GÉNÉRER LA CLÉ SAAS</button>
+            </form>
             
-            <div class="form-group">
-                <label>MOIS DE CIBLE :</label>
-                <select id="mois">
-                    <option value="1">01</option>
-                    <option value="2">02</option>
-                    <option value="3">03</option>
-                    <option value="4">04</option>
-                    <option value="5">05</option>
-                    <option value="6">06</option>
-                    <option value="7">07</option>
-                    <option value="8">08</option>
-                    <option value="9">09</option>
-                    <option value="10" selected>10</option>
-                    <option value="11">11</option>
-                    <option value="12">12</option>
-                </select>
-            </div>
-            
-            <div class="form-group">
-                <label>ANNÉE :</label>
-                <select id="annee">
-                    <option value="2026" selected>2026</option>
-                    <option value="2027">2027</option>
-                    <option value="2028">2028</option>
-                    <option value="2029">2029</option>
-                    <option value="2030">2030</option>
-                </select>
-            </div>
-            
-            <button class="btn" onclick="calculerCleLocale()">⚡ GÉNÉRER LA CLÉ SAAS</button>
-            
-            <div class="result-box" id="bloc_resultat">
-                <div class="result-title">🔑 CODE WHATSAPP À ENVOYER :</div>
-                <div class="result-code" id="code_affichage">KASH-XXXX-XXXX</div>
-            </div>
+            {code_genere_html}
         </div>
-
-        <script>
-            function md5(string) {
-                function k(b,c,l,m,s,i,a){return h(c^l^m,b,c,s,i,a)}
-                function g(b,c,l,m,s,i,a){return h(c&m|l&~m,b,c,s,i,a)}
-                function f(b,c,l,m,s,i,a){return h(b&c|~b&l,b,c,s,i,a)}
-                function h(b,c,l,m,s,i,a){b=add(add(b,c),add(m,a));return add(b<<s|b>>>32-s,l)}
-                function add(b,c){var l=(b&65535)+(c&65535);return(b>>16)+(c>>16)+(l>>16)<<16|l&65535}
-                
-                var c, l=string.length, m_init=[1732584193,-271733879,-1732584194,271733878], s;
-                for(c=64;c<=string.length;c+=64);
-                var i=new Array(c);
-                for(s=0;s<c;s++)i[s]=0;
-                for(s=0;s<l;s++)i[s>>2]|=string.charCodeAt(s)<<s%4*8;
-                i[s>>2]|=128<<s%4*8;
-                i[c-8]=l*8;
-                
-                # 🟢 CORRIGÉ : Utilisation de m_init pour éviter l'écrasement de boucle JavaScript
-                var a=m_init[0], e=m_init[1], j=m_init[2], d=m_init[3];
-                for(c=0;c<i.length;c+=16){
-                    var n=a,o=e,p=j,q=d;
-                    a=f(a,e,j,d,i[c+0],7,-680876936);d=f(d,a,e,j,i[c+1],12,-389564586);j=f(j,d,a,e,i[c+2],17,606105819);e=f(e,j,d,a,i[c+3],22,-1044525330);
-                    a=f(a,e,j,d,i[c+4],7,-176418897);d=f(d,a,e,j,i[c+5],12,1200080426);j=f(j,d,a,e,i[c+6],17,-1473231341);e=f(e,j,d,a,i[c+7],22,-45705983);
-                    a=f(a,e,j,d,i[c+8],7,1770035416);d=f(d,a,e,j,i[c+9],12,-1958414417);j=f(j,d,a,e,i[c+10],17,-42063);e=f(e,j,d,a,i[c+11],22,-1990404162);
-                    a=f(a,e,j,d,i[c+12],7,1804603682);d=f(d,a,e,j,i[c+13],12,-40341101);j=f(j,d,a,e,i[c+14],17,-1502002290);e=f(e,j,d,a,i[c+15],22,1236535329);
-                    a=g(a,e,j,d,i[c+1],5,-165796510);d=g(d,a,e,j,i[c+6],9,-1069501632);j=g(j,d,a,e,i[c+11],14,643717713);e=g(e,j,d,a,i[c+0],20,-373897302);
-                    a=g(a,e,j,d,i[c+5],5,-701558691);d=g(d,a,e,j,i[c+10],9,38016083);j=g(j,d,a,e,i[c+15],14,-660478335);e=g(e,j,d,a,i[c+4],20,-405537848);
-                    a=g(a,e,j,d,i[c+9],5,568446438);d=g(d,a,e,j,i[c+14],9,-1019803690);j=g(j,d,a,e,i[c+3],14,-187363961);e=g(e,j,d,a,i[c+8],20,1163531501);
-                    a=g(a,e,j,d,i[c+13],5,-1444681467);d=g(d,a,e,j,i[c+2],9,-51403784);j=g(j,d,a,e,i[c+7],14,1735328473);e=g(e,j,d,a,i[c+12],20,-1926607734);
-                    a=k(a,e,j,d,i[c+5],4,-378558);d=k(d,a,e,j,i[c+8],11,-2022574463);j=k(j,d,a,e,i[c+11],16,1839030562);e=k(e,j,d,a,i[c+14],23,-35309556);
-                    a=k(a,e,j,d,i[c+1],4,-1530992060);d=k(d,a,e,j,i[c+4],11,1272893353);j=k(j,d,a,e,i[c+7],16,-155497632);e=k(e,j,d,a,i[c+10],23,-1094730640);
-                    a=k(a,e,j,d,i[c+13],4,681279174);d=k(d,a,e,j,i[c+0],11,-358537222);j=k(j,d,a,e,i[c+3],16,-722521979);e=k(e,j,d,a,i[c+6],23,76029189);
-                    a=k(a,e,j,d,i[c+9],4,-640364487);d=k(d,a,e,j,i[c+12],11,-421815835);j=k(j,d,a,e,i[c+15],16,530742520);e=k(e,j,d,a,i[c+2],23,-995338651);
-                    a=h(e^(j|~d),a,e,i[c+0],6,-198630844);d=h(j^(a|~e),d,a,i[c+7],10,1126891415);j=h(a^(d|~j),j,d,i[c+14],15,-1416354905);e=h(d^(j|~a),e,j,i[c+5],21,-57434055);
-                    a=h(j^(e|~d),a,e,i[c+12],6,1700485571);d=h(e^(a|~j),d,a,i[c+3],10,-1894986606);j=h(a^(d|~e),j,d,i[c+10],15,-1051523);e=h(d^(j|~a),e,j,i[c+1],21,-2054922799);
-                    a=h(j^(e|~d),a,e,i[c+8],6,1873313359);d=h(e^(a|~j),d,a,i[c+15],10,-30611744);j=h(a^(d|~e),j,d,i[c+6],15,-1560198380);e=h(d^(j|~a),e,j,i[c+13],21,1309151649);
-                    a=h(j^(e|~d),a,e,i[c+4],6,-145523070);d=h(e^(a|~j),d,a,i[c+11],10,-1120210379);j=h(a^(d|~e),j,d,i[c+2],15,718787281);e=h(d^(j|~a),e,j,i[c+9],21,-343485551);
-                    a=add(a,n);e=add(e,o);j=add(j,p);d=add(d,q);
-                }
-                function r(b){var c="",l=b.length,m_hex="0123456789ABCDEF",s;for(s=0;s<l;s++)c+=m_hex.charAt(b[s]>>>4&15)+m_hex.charAt(b[s]&15);return c}
-                return r([a,e,j,d]);
-            }
-
-            function calculerCleLocale() {
-                var cle = document.getElementById('cle_client').value.trim();
-                var m = document.getElementById('mois').value;
-                var a = document.getElementById('annee').value;
-                
-                if(!cle) {
-                    alert("Veuillez saisir l'identifiant du client.");
-                    return;
-                }
-                
-                var sel = cle + "-" + m + "-" + a + "-KASHKEEPER-SERGE";
-                var hash = md5(sel);
-                var codeFinal = "KASH-" + hash.substring(0, 4) + "-" + hash.substring(4, 8);
-                
-                document.getElementById('code_affichage').innerText = codeFinal;
-                document.getElementById('bloc_resultat').style.display = 'block';
-            }
-        </script>
     </body>
     </html>
     """
     return HTMLResponse(content=html_content, status_code=200)
+
