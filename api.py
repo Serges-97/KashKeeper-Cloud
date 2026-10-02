@@ -373,27 +373,27 @@ def page_generateur_visuel_smartphone():
             <div class="form-group">
                 <label>MOIS DE CIBLE :</label>
                 <select id="mois">
-                    <option value="1">01</option>
-                    <option value="2">02</option>
-                    <option value="3">03</option>
-                    <option value="4">04</option>
-                    <option value="5">05</option>
-                    <option value="6">06</option>
-                    <option value="7">07</option>
-                    <option value="8">08</option>
-                    <option value="9">09</option>
-                    <option value="10" selected>10</option>
-                    <option value="11">11</option>
-                    <option value="12">12</option>
+                    <option value="1" {"selected" if mois_actuel == 1 else ""}>01</option>
+                    <option value="2" {"selected" if mois_actuel == 2 else ""}>02</option>
+                    <option value="3" {"selected" if mois_actuel == 3 else ""}>03</option>
+                    <option value="4" {"selected" if mois_actuel == 4 else ""}>04</option>
+                    <option value="5" {"selected" if mois_actuel == 5 else ""}>05</option>
+                    <option value="6" {"selected" if mois_actuel == 6 else ""}>06</option>
+                    <option value="7" {"selected" if mois_actuel == 7 else ""}>07</option>
+                    <option value="8" {"selected" if mois_actuel == 8 else ""}>08</option>
+                    <option value="9" {"selected" if mois_actuel == 9 else ""}>09</option>
+                    <option value="10" {"selected" if mois_actuel == 10 else ""}>10</option>
+                    <option value="11" {"selected" if mois_actuel == 11 else ""}>11</option>
+                    <option value="12" {"selected" if mois_actuel == 12 else ""}>12</option>
                 </select>
             </div>
             
             <div class="form-group">
                 <label>ANNÉE :</label>
                 <select id="annee">
-                    <option value="2026" selected>2026</option>
-                    <option value="2027">2027</option>
-                    <option value="2028">2028</option>
+                    <option value="2026" {"selected" if annee_actuelle == 2026 else ""}>2026</option>
+                    <option value="2027" {"selected" if annee_actuelle == 2027 else ""}>2027</option>
+                    <option value="2028" {"selected" if annee_actuelle == 2028 else ""}>2028</option>
                 </select>
             </div>
             
@@ -405,6 +405,7 @@ def page_generateur_visuel_smartphone():
             </div>
         </div>
 
+        <!-- Inclusion du CDN sécurisé pour charger le décodeur MD5 d'usine -->
         <script src="https://cloudflare.com"></script>
         <script>
             function calculerCleLocale() {{
