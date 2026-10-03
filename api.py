@@ -282,9 +282,10 @@ def api_reception_webhook_campay(payload: dict):
 
 @app.get("/serge/generateur", response_class=HTMLResponse)
 def page_generateur_visuel_en_dur(cle_client: str = None, mois: int = None, annee: int = None):
-    """Génère l'interface web mobile et calcule la clé d'activation EN DUR en Python pur."""
+    """Génère l'interface web mobile, calcule la clé en dur et affiche le registre des clients stockés."""
     import hashlib
     import datetime
+    import sqlite3
     
     maintenant = datetime.datetime.now()
     mois_par_defaut = mois if mois is not None else maintenant.month
@@ -293,7 +294,7 @@ def page_generateur_visuel_en_dur(cle_client: str = None, mois: int = None, anne
     
     code_genere_html = ""
     
-    # 🟢 CALCUL EN DUR : Si les données sont soumises, Python calcule directement la clé
+    # 🟢 1. CALCUL EN DUR PYTHON
     if cle_client and mois and annee:
         sel_secret = f"{cle_client.strip()}-{mois}-{annee}-KASHKEEPER-SERGE"
         signature_unitaire = hashlib.md5(sel_secret.encode("utf-8")).hexdigest().upper()[:8]
@@ -306,19 +307,38 @@ def page_generateur_visuel_en_dur(cle_client: str = None, mois: int = None, anne
         </div>
         """
 
-    # Génération des options du menu déroulant des mois
-    options_mois = ""
-    for i in range(1, 13):
-        selected = "selected" if i == int(mois_par_defaut) else ""
-        options_mois += f'<option value="{i}" {selected}>{str(i).zfill(2)}</option>'
+    # 🟢 2. EXTRACTION EN DIRECT DE LA BASE DE DONNÉES CLOUD
+    lignes_clients_html = ""
+    try:
+        conn = sqlite3.connect(DB_LICENCES_CLOUD)
+        curseur = conn.cursor()
+        curseur.execute("SELECT cle_boutique, date_expiration, statut_reglement FROM abonnements_magasin ORDER BY cle_boutique ASC")
+        lignes_db = curseur.fetchall()
+        conn.close()
+        
+        if not lignes_db:
+            lignes_clients_html = '<tr><td colspan="3" style="padding: 10px; color: #64748b; font-style: italic;">Aucune boutique enregistrée pour le moment.</td></tr>'
+        else:
+            for row in lignes_db:
+                cle_escape = row[0].replace("'", "\\'")
+                lignes_clients_html += f"""
+                <tr style="border-bottom: 1px solid #334155;">
+                    <td style="padding: 10px; font-weight: bold; color: #ffffff; text-align: left;">
+                        <span id="txt_{row[0]}">{row[0]}</span>
+                        <button type="button" onclick="copierEtColler('{cle_escape}')" style="margin-left: 8px; padding: 2px 6px; background-color: #3b82f6; color: white; border: none; border-radius: 4px; font-size: 0.7rem; cursor: pointer; font-weight: bold;">📋 Copier</button>
+                    </td>
+                    <td style="padding: 10px; color: #cbd5e1;">{row[1]}</td>
+                    <td style="padding: 10px; color: #10b981; font-weight: bold;">{str(row[2]).upper()}</td>
+                </tr>
+                """
+    except Exception as e:
+        lignes_clients_html = f'<tr><td colspan="3" style="padding: 10px; color: #ef4444;">Erreur SQL : {str(e)}</td></tr>'
 
-    # Génération des options du menu déroulant des années
-    options_annees = ""
-    for a in range (2026,2035): 
-        selected = "selected" if a == int(annee_par_defaut) else ""
-        options_annees += f'<option value="{a}" {selected}>{a}</option>'
+    # Génération des options de dates
+    options_mois = "".join(f'<option value="{i}" {"selected" if i==int(mois_par_defaut) else ""}>{str(i).zfill(2)}</option>' for i in range(1, 13))
+    options_annees = "".join(f'<option value="{a}" {"selected" if a==int(annee_par_defaut) else ""}>{a}</option>' for a in range(2026, 2036))
 
-    html_content = f""" 
+    html_content = f"""
     <!DOCTYPE html>
     <html lang="fr">
     <head>
@@ -331,11 +351,11 @@ def page_generateur_visuel_en_dur(cle_client: str = None, mois: int = None, anne
                 background-color: #0f172a;
                 color: #cbd5e1;
                 display: flex;
-                justify-content: center;
+                flex-direction: column;
                 align-items: center;
-                height: 100vh;
+                min-height: 100vh;
                 margin: 0;
-                padding: 10px;
+                padding: 20px 10px;
                 box-sizing: border-box;
             }}
             .card {{
@@ -344,8 +364,9 @@ def page_generateur_visuel_en_dur(cle_client: str = None, mois: int = None, anne
                 border-radius: 12px;
                 box-shadow: 0 10px 25px rgba(0,0,0,0.5);
                 width: 100%;
-                max-width: 360px;
+                max-width: 420px;
                 text-align: center;
+                margin-bottom: 25px;
             }}
             h2 {{ color: #f59e0b; margin-top: 0; font-size: 1.3rem; letter-spacing: 0.5px; }}
             p {{ color: #94a3b8; font-size: 0.85rem; margin-bottom: 20px; }}
@@ -375,6 +396,17 @@ def page_generateur_visuel_en_dur(cle_client: str = None, mois: int = None, anne
                 cursor: pointer;
                 margin-top: 10px;
             }}
+            .table-container {{
+                background-color: #1e293b;
+                border-radius: 12px;
+                padding: 15px;
+                width: 100%;
+                max-width: 420px;
+                box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+                box-sizing: border-box;
+            }}
+            table {{ width: 100%; border-collapse: collapse; font-size: 0.85rem; }}
+            th {{ background-color: #0f172a; padding: 10px; color: #f59e0b; font-weight: bold; text-align: center; }}
         </style>
     </head>
     <body>
@@ -382,11 +414,10 @@ def page_generateur_visuel_en_dur(cle_client: str = None, mois: int = None, anne
             <h2>KASHKEEPER MANAGER</h2>
             <p>Générateur d'Activation Manuelle SaaS</p>
             
-            <!-- Formulier d'action natif qui recharge la page en dur -->
             <form action="/serge/generateur" method="get">
                 <div class="form-group">
                     <label>ID OU CLÉ DU CLIENT :</label>
-                    <input type="text" name="cle_client" value="{cle_par_defaut}" required>
+                    <input type="text" id="champ_cle_client" name="cle_client" value="{cle_par_defaut}" required>
                 </div>
                 
                 <div class="form-group">
@@ -408,8 +439,35 @@ def page_generateur_visuel_en_dur(cle_client: str = None, mois: int = None, anne
             
             {code_genere_html}
         </div>
+
+        <!-- 🟢 3. TABLEAU MENU DES CLIENTS ENREGISTRÉS EN BASE DE DONNÉES CLOUD -->
+        <div class="table-container">
+            <h3 style="color: #cbd5e1; margin-top: 0; font-size: 1rem; text-align: left; border-bottom: 2px solid #f59e0b; padding-bottom: 8px;">📋 CLIENTS ENREGISTRÉS (`abonnements_magasin`)</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Clé API Boutique</th>
+                        <th>Échéance</th>
+                        <th>Statut</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {lignes_clients_html}
+                </tbody>
+            </table>
+        </div>
+
+        <script>
+            function copierEtColler(cleBoutique) {{
+                // Remplit automatiquement le champ texte d'activation en haut de la page
+                document.getElementById('champ_cle_client').value = cleBoutique;
+                // Alerte visuelle discrète de succès sur mobile
+                window.scrollTo({{ top: 0, behavior: 'smooth' }});
+            }}
+        </script>
     </body>
     </html>
     """
     return HTMLResponse(content=html_content, status_code=200)
+
 
