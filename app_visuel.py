@@ -96,13 +96,20 @@ def imprimer_ticket_thermique_direct(client, liste_articles, total_ttc, caissier
 def charger_configuration_externe():
     """Lit dynamiquement la configuration réseau du client (config.txt) à la racine de l'exécutable."""
     global URL_API_KASHFLOW, CLE_API_KASHFLOW
-    dossier_prog = os.path.dirname(os.path.abspath(__file__))
+    
+    # 🟢 AJUSTEMENT DE PRODUCTION : Détection universelle du dossier réel sous Windows (.exe ou .py)
+    import sys
+    if getattr(sys, 'frozen', False):
+        dossier_prog = os.path.dirname(os.path.abspath(sys.executable))
+    else:
+        dossier_prog = os.path.dirname(os.path.abspath(__file__))
+        
     fichier_config = os.path.join(dossier_prog, "config.txt")
     
     if not os.path.exists(fichier_config):
         with open(fichier_config, "w", encoding="utf-8") as f:
             f.write("# CONFIGURATION RESEAU KASHFLOW MANAGER \n")
-            f.write("URL_API - https://onrender.com \n")
+            f.write("URL_API - https://kashkeeper-cloud.onrender.com \n")
             f.write("CLE_API - KASHFLOW_KEY_DEFAUT\n")
         return
 
