@@ -15,7 +15,7 @@ import json
 import win32print
 import win32ui
 import webbrowser
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 
 # Lancement des configurations SQLite d'usine au démarrage du logiciel
 data_base.initialisation_systeme()
@@ -34,6 +34,56 @@ PANIER_FACTURE_EN_COURS = []
 # =====================================================================
 # MODULE 4 : app_visuel.py (Version Multi-Postes Pro - ÉTAPE 2 SUR 15)
 # =====================================================================
+
+def lancer_thread_synchronisation_asynchrone():
+    """Démarre le moteur de synchronisation en arrière-plan sans bloquer la caissière."""
+    def boucle_synchro_hybride():
+        while True:
+            try:
+                # 1. Lire les ventes locales en attente (synchro = 0)
+                conn = sqlite3.connect(data_base.DB_NAME)
+                ventes_locales = conn.execute(
+                    "SELECT reference_locale, client, article, description_unique, montant_ht, tva, total_ttc, caissiere, quantite FROM ventes WHERE synchro = 0"
+                ).fetchall()
+                conn.close()
+
+                if ventes_locales and URL_API_KASHFLOW and CLE_API_KASHFLOW:
+                    # 2. Envoyer le paquet global au serveur Render Cloud
+                    for v in ventes_locales:
+                        payload = {
+                            "reference_locale": v[0],
+                            "client": v[1],
+                            "article": v[2],
+                            "description_unique": v[3],
+                            "prix_ht": v[4] / v[8] if v[8] > 0 else v[4], # Prix unitaire HT
+                            "quantite": v[8],
+                            "caissiere": v[7],
+                            "applique_tva_vente": 1 if v[5] > 0 else 0
+                        }
+                        try:
+                            reponse = requests.post(
+                                f"{URL_API_KASHFLOW}/ventes/synchroniser",
+                                json=payload,
+                                headers={"X-API-Key": CLE_API_KASHFLOW},
+                                timeout=5
+                            )
+                            if reponse.status_code == 200:
+                                # 3. Si Render PostgreSQL a enregistré, on valide localement (synchro = 1)
+                                conn_up = sqlite3.connect(data_base.DB_NAME)
+                                conn_up.execute("UPDATE ventes SET synchro = 1 WHERE reference_locale = ?", (v[0],))
+                                conn_up.commit()
+                                conn_up.close()
+                        except Exception:
+                            continue # Si une transaction échoue, on continue la boucle
+            except Exception as error_db:
+                logging.warning("Moteur hybride asynchrone hors-ligne - Attente connexion : %s", error_db)
+            
+            # Vérification toutes les 30 secondes
+            time.sleep(30)
+
+    thread_sync = threading.Thread(target=boucle_synchro_hybride, daemon=True)
+    thread_sync.start()
+
 def imprimer_ticket_thermique_direct(client, liste_articles, total_ttc, caissiere):
     """Pilote physiquement les bobines de l'imprimante thermique détectée sur le port USB Windows."""
     try:
@@ -1519,6 +1569,7 @@ def verifier_acces():
                 NOM_CAISSIERE_ACTIVE = str(user).strip().lower()
                 messagebox.showinfo("Accès Autorisé", f"Bienvenue {SESSION_UTILISATEUR.upper()} !")
                 FENETRE_PRINCIPALE_LOGIN.withdraw()
+                lancer_thread_synchronisation_asynchrone()
                 ouvrir_comptoir_facturation()
 
         else:
@@ -1855,6 +1906,49 @@ btn_abonnement = tk.Button(
 )
 btn_abonnement.pack(side=tk.RIGHT)
 
+def lancer_moteur_hybride_synchro_cloud():
+    """ thread invisible qui propulse les ventes vers Render PostgreSQL quand Internet est actif. """
+    def boucle_traitement():
+        while True:
+            try:
+                # 1. Extraction des lignes locales non encore synchronisées (synchro = 0)
+                conn = sqlite3.connect(data_base.DB_NAME)
+                ventes_locales = conn.execute("""
+                    SELECT id, client, article, description_unique, montant_ht, tva, total_ttc, caissiere, jour || '/' || mois || '/' || annee || ' ' || heure 
+                    FROM ventes WHERE synchro = 0 LIMIT 10
+                """).fetchall()
+                conn.close()
+                
+                if ventes_locales and URL_API_KASHFLOW and CLE_API_KASHFLOW:
+                    paquet_ventes = []
+                    for v in ventes_locales:
+                        paquet_ventes.append({
+                            "id_local": v[0], "client": v[1], "article": v[2], "description_unique": v[3],
+                            "montant_ht": v[4], "tva": v[5], "total_ttc": v[6], "caissiere": v[7], "date_vente": v[8]
+                        })
+                    
+                    # 2. Expédition vers ton API d'infrastructure
+                    reponse = requests.post(
+                        f"{URL_API_KASHFLOW}/sync/ventes_magasin",
+                        json={"ventes": paquet_ventes},
+                        headers={"X-API-Key": CLE_API_KASHFLOW},
+                        timeout=5
+                    )
+                    
+                    # 3. Si Render PostgreSQL valide, on marque synchro = 1 en local pour ne plus les renvoyer
+                    if reponse.status_code == 200:
+                        ids_a_marquer = reponse.json().get("ids_synchonises", [])
+                        conn_up = sqlite3.connect(data_base.DB_NAME)
+                        for id_l in ids_a_marquer:
+                            conn_up.execute("UPDATE ventes SET synchro = 1 WHERE id = ?", (id_l,))
+                        conn_up.commit()
+                        conn_up.close()
+            except Exception:
+                pass # Internet est coupé au marché, le logiciel attend le prochain tour sans bloquer
+                
+            time.sleep(30) # Tourne en boucle toutes les 30 secondes
+
+    threading.Thread(target=boucle_traitement, daemon=True).start()
 # Allumage officiel du logiciel d'usine
 login.mainloop()
 

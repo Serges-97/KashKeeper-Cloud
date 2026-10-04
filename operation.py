@@ -108,7 +108,7 @@ def generer_recu_pdf_industriel(nom_boutique, num_facture, nom_client, telephone
         # =====================================================================
         pdf.set_font("Helvetica", "B", 9.5)
         pdf.set_text_color(15, 23, 42)
-        pdf.cell(64, 5, f"Client : {nom_client.upper()} ({telephone_client})", ln=0)
+        pdf.cell(64, 5, f"Client : {nom_client.upper()} ", ln=0)
         pdf.cell(64, 5, f"Émis par : {nom_caissiere.upper()}", ln=1, align="R")
         pdf.ln(3)
 # =====================================================================
@@ -122,7 +122,7 @@ def generer_recu_pdf_industriel(nom_boutique, num_facture, nom_client, telephone
         pdf.set_font("Helvetica", "B", 8.5)
         
         # En-têtes des colonnes de la grille
-        pdf.cell(53, 6, " DÉSIGNATION (IMEI/SERIE)", border=1, ln=False, fill=True)
+        pdf.cell(53, 6, " DÉSIGNATION (IMEI/SERIE...)", border=1, ln=False, fill=True)
         pdf.cell(12, 6, "QTÉ", border=1, ln=False, align="C", fill=True)
         pdf.cell(31, 6, "P.U HT", border=1, ln=False, align="R", fill=True)
         pdf.cell(32, 6, "TOTAL TTC ", border=1, ln=True, align="R", fill=True)
