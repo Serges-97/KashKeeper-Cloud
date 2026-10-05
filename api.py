@@ -336,6 +336,35 @@ def api_reception_webhook_campay(payload: dict):
         return {"status": "Mis à jour"}
     return {"status": "Ignoré"}
 
+@app.get("/boutique/telecharger-stocks")
+def api_envoyer_stocks_aux_caissieres(x_api_key: str = Header(...)):
+    """Renvoie la liste complète des stocks enregistrés sur PostgreSQL pour cette boutique."""
+    try:
+        conn = obtenir_connexion_postgresql()
+        curseur = conn.cursor()
+        curseur.execute("SELECT article, description_unique, prix_ht, quantite FROM produits_cloud WHERE cle_boutique = %s", (x_api_key.strip(),))
+        articles = curseur.fetchall()
+        curseur.close()
+        conn.close()
+        return {"articles": articles}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/boutique/telecharger-employes")
+def api_envoyer_employes_aux_caissieres(x_api_key: str = Header(...)):
+    """Renvoie la liste des comptes caissières créés par le gérant à distance."""
+    try:
+        conn = obtenir_connexion_postgresql()
+        curseur = conn.cursor()
+        curseur.execute("SELECT identifiant, mot_de_passe, role, salaire FROM employes_cloud WHERE cle_boutique = %s", (x_api_key.strip(),))
+        employes = curseur.fetchall()
+        curseur.close()
+        conn.close()
+        return {"employes": employes}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/serge/generateur", response_class=HTMLResponse)
 def page_generateur_visuel_en_dur(cle_client: str = None, mois: int = None, annee: int = None):
     """Génère l'interface web mobile, calcule la clé en dur et affiche le registre des clients stockés."""

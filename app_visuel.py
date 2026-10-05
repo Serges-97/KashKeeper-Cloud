@@ -1587,6 +1587,7 @@ def verifier_acces():
                 NOM_CAISSIERE_ACTIVE = str(user).strip().lower()
                 messagebox.showinfo("Accès Autorisé", f"Bienvenue {SESSION_UTILISATEUR.upper()} !")
                 FENETRE_PRINCIPALE_LOGIN.withdraw()
+                rafraichir_donnees_locales_depuis_cloud() 
                 lancer_thread_synchronisation_asynchrone()
                 ouvrir_comptoir_facturation()
 
@@ -1968,5 +1969,41 @@ def lancer_moteur_hybride_synchro_cloud():
 
     threading.Thread(target=boucle_traitement, daemon=True).start()
 # Allumage officiel du logiciel d'usine
+
+def rafraichir_donnees_locales_depuis_cloud():
+    """Télécharge les stocks et les employés depuis Render pour écraser le SQLite local."""
+    global URL_API_KASHFLOW, CLE_API_KASHFLOW
+    if URL_API_KASHFLOW and CLE_API_KASHFLOW:
+        try:
+            headers = {"X-API-Key": CLE_API_KASHFLOW}
+            
+            # 1. Téléchargement et synchronisation des stocks
+            rep_stocks = requests.get(f"{URL_API_KASHFLOW}/boutique/telecharger-stocks", headers=headers, timeout=5)
+            if rep_stocks.status_code == 200:
+                articles = rep_stocks.json().get("articles", [])
+                conn = sqlite3.connect(data_base.DB_NAME)
+                conn.execute("DELETE FROM produits") # On vide l'ancien stock local
+                for art in articles:
+                    conn.execute("INSERT INTO produits (article, description_unique, prix_ht, quantite) VALUES (?, ?, ?, ?)", 
+                                 (art["article"], art["description_unique"], art["prix_ht"], art["quantite"]))
+                conn.commit()
+                conn.close()
+
+            # 2. Téléchargement et synchronisation des employés
+            rep_emp = requests.get(f"{URL_API_KASHFLOW}/boutique/telecharger-employes", headers=headers, timeout=5)
+            if rep_emp.status_code == 200:
+                employes = rep_emp.json().get("employes", [])
+                conn = sqlite3.connect(data_base.DB_NAME)
+                conn.execute("DELETE FROM employes WHERE role != 'gerant'") # Garde le gérant local
+                for emp in employes:
+                    conn.execute("INSERT INTO employes (identifiant, mot_de_passe, role, salaire) VALUES (?, ?, ?, ?)", 
+                                 (emp["identifiant"], emp["mot_de_passe"], emp["role"], emp["salaire"]))
+                conn.commit()
+                conn.close()
+                
+            print("🔄 Données de la boutique synchronisées avec succès depuis le Cloud !")
+        except Exception as e:
+            print(f"⚠️ Impossible de rafraîchir les données (Mode hors-ligne) : {e}")
+
 login.mainloop()
 
