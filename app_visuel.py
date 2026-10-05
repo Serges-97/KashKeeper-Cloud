@@ -26,8 +26,9 @@ NOM_CAISSIERE_ACTIVE = "Anonyme"
 NOM_BOUTIQUE_FIXE = "KASHKEEPER"
 CLE_MASTER_SERGE = "Je suis simple"
 
-URL_API_KASHFLOW = "https://onrender.com" 
-CLE_API_KASHFLOW = "KASHFLOW_KEY_DEFAUT"
+URL_API_KASHFLOW = ""
+CLE_API_KASHFLOW = ""
+
 
 # Variable globale pour stocker le panier multi-articles en cours de facturation
 PANIER_FACTURE_EN_COURS = []
@@ -1973,6 +1974,7 @@ def lancer_moteur_hybride_synchro_cloud():
 def rafraichir_donnees_locales_depuis_cloud():
     """Télécharge les stocks et les employés depuis Render pour écraser le SQLite local."""
     global URL_API_KASHFLOW, CLE_API_KASHFLOW
+
     if URL_API_KASHFLOW and CLE_API_KASHFLOW:
         try:
             headers = {"X-API-Key": CLE_API_KASHFLOW}
