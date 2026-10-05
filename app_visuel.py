@@ -66,7 +66,7 @@ def lancer_thread_synchronisation_asynchrone():
                                 f"{URL_API_KASHFLOW}/ventes/synchroniser",
                                 json=payload,
                                 headers={"X-API-Key": CLE_API_KASHFLOW},
-                                timeout=5
+                                timeout=15
                             )
                             if reponse.status_code == 200:
                                 # 3. Si Render PostgreSQL a enregistré, on valide localement (synchro = 1)
@@ -942,7 +942,7 @@ def ouvrir_comptoir_facturation():
     def rafraichir_stocks_depuis_cloud():
         if not URL_API_KASHFLOW or not CLE_API_KASHFLOW: return
         try:
-            reponse = requests.get(f"{URL_API_KASHFLOW}/stocks/etat", headers={"X-API-Key": CLE_API_KASHFLOW}, timeout=5)
+            reponse = requests.get(f"{URL_API_KASHFLOW}/stocks/etat", headers={"X-API-Key": CLE_API_KASHFLOW}, timeout=15)
             if reponse.status_code == 200:
                 for item in reponse.json().get("inventaire_magasin", []):
                     art = item.get("article_modele", "")
@@ -1556,7 +1556,7 @@ def verifier_acces():
             autorisation_ouvrir_comptoir = True
             
             try:
-                reponse_licence = requests.get(f"{URL_API_KASHFLOW}/licence/statut", headers={"X-API-Key": CLE_API_KASHFLOW}, timeout=5)
+                reponse_licence = requests.get(f"{URL_API_KASHFLOW}/licence/statut", headers={"X-API-Key": CLE_API_KASHFLOW}, timeout=15)
                 if reponse_licence.status_code == 200:
                     infos = reponse_licence.json()
                     statut_serveur = infos.get("statut", "actif")
@@ -1952,7 +1952,7 @@ def lancer_moteur_hybride_synchro_cloud():
                         f"{URL_API_KASHFLOW}/sync/ventes_magasin",
                         json={"ventes": paquet_ventes},
                         headers={"X-API-Key": CLE_API_KASHFLOW},
-                        timeout=5
+                        timeout=15
                     )
                     
                     # 3. Si Render PostgreSQL valide, on marque synchro = 1 en local pour ne plus les renvoyer
@@ -1980,7 +1980,7 @@ def rafraichir_donnees_locales_depuis_cloud():
             headers = {"X-API-Key": CLE_API_KASHFLOW}
             
             # 1. Téléchargement et synchronisation des stocks
-            rep_stocks = requests.get(f"{URL_API_KASHFLOW}/boutique/telecharger-stocks", headers=headers, timeout=5)
+            rep_stocks = requests.get(f"{URL_API_KASHFLOW}/boutique/telecharger-stocks", headers=headers, timeout=15)
             if rep_stocks.status_code == 200:
                 articles = rep_stocks.json().get("articles", [])
                 conn = sqlite3.connect(data_base.DB_NAME)
@@ -1992,7 +1992,7 @@ def rafraichir_donnees_locales_depuis_cloud():
                 conn.close()
 
             # 2. Téléchargement et synchronisation des employés
-            rep_emp = requests.get(f"{URL_API_KASHFLOW}/boutique/telecharger-employes", headers=headers, timeout=5)
+            rep_emp = requests.get(f"{URL_API_KASHFLOW}/boutique/telecharger-employes", headers=headers, timeout=15)
             if rep_emp.status_code == 200:
                 employes = rep_emp.json().get("employes", [])
                 conn = sqlite3.connect(data_base.DB_NAME)
