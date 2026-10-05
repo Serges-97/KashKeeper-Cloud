@@ -753,7 +753,7 @@ def ouvrir_panneau_historique():
 # MODULE 4 : app_visuel.py (Version Multi-Postes Pro - ÉTAPE 9 SUR 15)
 # =====================================================================
 def ouvrir_panneau_employes():
-    """Interface d'administration de la liste des employés et de configuration de leurs salaires."""
+    """Interface d'administration de la liste des employés et de configuration de leurs salaires et régimes fiscaux."""
     if SESSION_UTILISATEUR != "gerant":
         messagebox.showerror("Accès Interdit", "Espace réservé au gérant de la boutique.")
         return
@@ -762,6 +762,7 @@ def ouvrir_panneau_employes():
         for i in tableau_emp.get_children(): tableau_emp.delete(i)
         lignes = data_base.obtenir_tous_les_employes_complets()
         for id_db, identifiant, role, salaire in lignes:
+            # 🟢 NOTE : On garde l'affichage standard du salaire
             tableau_emp.insert("", tk.END, iid=str(id_db), values=(str(identifiant).upper(), str(role).upper(), f"{salaire:,} FCFA"))
 
     def action_definir_salaire():
@@ -782,15 +783,19 @@ def ouvrir_panneau_employes():
         nom = entree_emp_nom.get().strip().lower()
         mdp = entree_emp_mdp.get().strip()
         sal_txt = entree_emp_sal.get().strip()
+        # 🟢 RÉCUPÉRATION DU CHOIX TVA : 1 si coché, 0 si décoché
+        tva_statut = 1 if var_applique_tva_rh.get() else 0
         
         if not all([nom, mdp, sal_txt]):
             messagebox.showwarning("Champs vides", "Veuillez remplir le nom, le mot de passe et le salaire.")
             return
         try:
             salaire = float(sal_txt)
-            if data_base.ajouter_nouvel_employe_sql(nom, mdp, 1, salaire):
+            # 🟢 CORRIGÉ : On passe dynamiquement tva_statut au moteur SQL d'origine
+            if data_base.ajouter_nouvel_employe_sql(nom, mdp, tva_statut, salaire):
                 messagebox.showinfo("Succès", f"L'employé '{nom.upper()}' a été ajouté avec succès.")
                 entree_emp_nom.delete(0, tk.END); entree_emp_mdp.delete(0, tk.END); entree_emp_sal.delete(0, tk.END)
+                var_applique_tva_rh.set(True) # Réinitialisation de la case à cocher
                 rafraichir_liste_employes()
                 entree_emp_nom.focus()
             else: messagebox.showerror("Erreur", "Cet identifiant existe déjà.")
@@ -812,7 +817,7 @@ def ouvrir_panneau_employes():
 
     fenetre_emp = Toplevel(FENETRE_PRINCIPALE_LOGIN)
     fenetre_emp.title("👥 Administration des RH - Registre du Personnel")
-    fenetre_emp.geometry("560x580")
+    fenetre_emp.geometry("560x620") # Augmentation légère de la hauteur pour accueillir proprement la case TVA
     fenetre_emp.configure(bg="#f8fafc")
     fenetre_emp.resizable(False, False); fenetre_emp.grab_set()
 
@@ -820,7 +825,7 @@ def ouvrir_panneau_employes():
     cadre_table = tk.Frame(fenetre_emp, bg="#f8fafc")
     cadre_table.pack(fill=tk.BOTH, expand=True, padx=15, pady=5)
 
-    tableau_emp = ttk.Treeview(cadre_table, columns=("Nom", "Role", "Salaire"), show="headings", height=8)
+    tableau_emp = ttk.Treeview(cadre_table, columns=("Nom", "Role", "Salaire"), show="headings", height=6)
     tableau_emp.heading("Nom", text="IDENTIFIANT EMPLOYÉ"); tableau_emp.heading("Role", text="PRIVILÈGE ACCÈS"); tableau_emp.heading("Salaire", text="SALAIRE MENSUEL")
     tableau_emp.column("Nom", width=200, anchor=tk.W); tableau_emp.column("Role", width=120, anchor=tk.CENTER); tableau_emp.column("Salaire", width=160, anchor=tk.CENTER)
     
@@ -846,6 +851,18 @@ def ouvrir_panneau_employes():
     entree_emp_sal = tk.Entry(cadre_form, font=("Helvetica", 10))
     entree_emp_sal.pack(fill=tk.X, pady=2)
 
+    # 🟢 INTEGRATION CHIRURGICALE DE LA CASE A COCHER TVA DANS LE FORMULAIRE RH
+    var_applique_tva_rh = tk.BooleanVar(value=True)
+    case_tva_rh = tk.Checkbutton(
+        cadre_form, 
+        text="Appliquer la TVA (19.25%) sur les factures de cet employé", 
+        variable=var_applique_tva_rh, 
+        bg="#f8fafc", 
+        font=("Helvetica", 9, "bold"), 
+        fg="#1e3a8a"
+    )
+    case_tva_rh.pack(anchor=tk.W, pady=4)
+
     # Configuration des liens de focalisation par la touche Entrée clavier
     entree_emp_nom.bind("<Return>", lambda event: entree_emp_mdp.focus())
     entree_emp_mdp.bind("<Return>", lambda event: entree_emp_sal.focus())
@@ -857,6 +874,7 @@ def ouvrir_panneau_employes():
     tk.Button(cadre_act_rh, text="🗑️ RETIRER DU REGISTRE PERSONNEL", bg="#dc2626", fg="white", font=("Helvetica", 9, "bold"), command=action_supprimer_employe_grille).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 0))
 
     rafraichir_liste_employes()
+
 
 
 # =====================================================================
