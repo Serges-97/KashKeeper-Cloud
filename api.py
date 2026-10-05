@@ -25,12 +25,12 @@ def obtenir_connexion_postgresql():
     return psycopg2.connect(DATABASE_URL_POSTGRES, cursor_factory=RealDictCursor)
 
 def initialiser_tables_postgresql_cloud():
-    """Crée automatiquement les tables requises sur PostgreSQL Render au démarrage de l'API."""
+    """Prépare toutes les tables requises sur PostgreSQL Render au démarrage pour le contrôle total à distance."""
     try:
         conn = obtenir_connexion_postgresql()
         curseur = conn.cursor()
         
-        # 1. Création de la table des abonnements et licences
+        # 1. Table des licences / abonnements
         curseur.execute("""
             CREATE TABLE IF NOT EXISTS abonnements_magasin (
                 id SERIAL PRIMARY KEY,
@@ -40,30 +40,57 @@ def initialiser_tables_postgresql_cloud():
             );
         """)
         
-        # 2. Injection automatique de ta propre clé de licence de test si la base est vide
+        # 2. Table de centralisation du catalogue des produits pour les caissières
+        curseur.execute("""
+            CREATE TABLE IF NOT EXISTS produits_cloud (
+                id SERIAL PRIMARY KEY,
+                cle_boutique VARCHAR(255) NOT NULL,
+                article VARCHAR(255) NOT NULL,
+                description_unique TEXT,
+                prix_ht REAL NOT NULL,
+                quantite INTEGER NOT NULL
+            );
+        """)
+
+        # 3. Table de centralisation des fiches employés / caissières créées à distance
+        curseur.execute("""
+            CREATE TABLE IF NOT EXISTS employes_cloud (
+                id SERIAL PRIMARY KEY,
+                cle_boutique VARCHAR(255) NOT NULL,
+                identifiant VARCHAR(255) NOT NULL,
+                mot_de_passe VARCHAR(255) NOT NULL,
+                role VARCHAR(50) DEFAULT 'caissiere',
+                salaire REAL DEFAULT 0.0
+            );
+        """)
+        
+        # Injection automatique des licences par défaut si elles n'existent pas
         curseur.execute("SELECT 1 FROM abonnements_magasin WHERE cle_boutique = 'SERGE_TECH_998877';")
         if not curseur.fetchone():
-            curseur.execute(
-                "INSERT INTO abonnements_magasin (cle_boutique, date_expiration, statut_reglement) VALUES (%s, %s, %s);",
-                ("SERGE_TECH_998877", "05/11/2026", "actif") # Offre 31 jours de licence par défaut
-            )
+            curseur.execute("INSERT INTO abonnements_magasin (cle_boutique, date_expiration, statut_reglement) VALUES (%s, %s, %s);", ("SERGE_TECH_998877", "05/11/2026", "actif"))
             
-        # 3. Injection automatique de la clé de ton amie caissière
         curseur.execute("SELECT 1 FROM abonnements_magasin WHERE cle_boutique = 'BOUTIQUE_1';")
         if not curseur.fetchone():
-            curseur.execute(
-                "INSERT INTO abonnements_magasin (cle_boutique, date_expiration, statut_reglement) VALUES (%s, %s, %s);",
-                ("BOUTIQUE_1", "05/11/2026", "actif")
-            )
+            curseur.execute("INSERT INTO abonnements_magasin (cle_boutique, date_expiration, statut_reglement) VALUES (%s, %s, %s);", ("BOUTIQUE_1", "05/11/2026", "actif"))
             
+        # 🟢 SIMULATION : Injection automatique de ton catalogue (tes 3 produits) pour le test de ton amie
+        curseur.execute("SELECT 1 FROM produits_cloud WHERE cle_boutique = 'BOUTIQUE_1';")
+        if not curseur.fetchone():
+            curseur.execute("INSERT INTO produits_cloud (cle_boutique, article, description_unique, prix_ht, quantite) VALUES (%s, %s, %s, %s, %s);", ("BOUTIQUE_1", "Iphone 12 Simple", "Stock Initial Pro", 350000, 3))
+            
+        # 🟢 SIMULATION : Injection automatique de son compte caissière de test
+        curseur.execute("SELECT 1 FROM employes_cloud WHERE cle_boutique = 'BOUTIQUE_1' AND identifiant = 'caissiere1';")
+        if not curseur.fetchone():
+            curseur.execute("INSERT INTO employes_cloud (cle_boutique, identifiant, mot_de_passe, role, salaire) VALUES (%s, %s, %s, %s, %s);", ("BOUTIQUE_1", "caissiere1", "1234", "caissiere", 50000))
+
         conn.commit()
         curseur.close()
         conn.close()
-        print("✅ [CLOUD POSTGRESQL] Tables initialisées et clés injectées avec succès !")
+        print("✅ [CLOUD POSTGRESQL] Toutes les tables d'inventaire et de personnel ont été initialisées avec succès !")
     except Exception as e:
-        print(f"❌ [ERREUR INITIALISATION POSTGRESQL] : {e}")
+        print(f"❌ [ERREUR INITIALISATION TABLES] : {e}")
 
-# Déclenchement automatique de la création des tables au lancement de l'API
+# Lancement au démarrage de ton serveur Render
 initialiser_tables_postgresql_cloud()
 
 
