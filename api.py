@@ -24,6 +24,49 @@ def obtenir_connexion_postgresql():
     """Crée une connexion directe à ton instance PostgreSQL Render."""
     return psycopg2.connect(DATABASE_URL_POSTGRES, cursor_factory=RealDictCursor)
 
+def initialiser_tables_postgresql_cloud():
+    """Crée automatiquement les tables requises sur PostgreSQL Render au démarrage de l'API."""
+    try:
+        conn = obtenir_connexion_postgresql()
+        curseur = conn.cursor()
+        
+        # 1. Création de la table des abonnements et licences
+        curseur.execute("""
+            CREATE TABLE IF NOT EXISTS abonnements_magasin (
+                id SERIAL PRIMARY KEY,
+                cle_boutique VARCHAR(255) UNIQUE NOT NULL,
+                date_expiration VARCHAR(50) NOT NULL,
+                statut_reglement VARCHAR(50) DEFAULT 'actif'
+            );
+        """)
+        
+        # 2. Injection automatique de ta propre clé de licence de test si la base est vide
+        curseur.execute("SELECT 1 FROM abonnements_magasin WHERE cle_boutique = 'SERGE_TECH_998877';")
+        if not curseur.fetchone():
+            curseur.execute(
+                "INSERT INTO abonnements_magasin (cle_boutique, date_expiration, statut_reglement) VALUES (%s, %s, %s);",
+                ("SERGE_TECH_998877", "05/11/2026", "actif") # Offre 31 jours de licence par défaut
+            )
+            
+        # 3. Injection automatique de la clé de ton amie caissière
+        curseur.execute("SELECT 1 FROM abonnements_magasin WHERE cle_boutique = 'BOUTIQUE_1';")
+        if not curseur.fetchone():
+            curseur.execute(
+                "INSERT INTO abonnements_magasin (cle_boutique, date_expiration, statut_reglement) VALUES (%s, %s, %s);",
+                ("BOUTIQUE_1", "05/11/2026", "actif")
+            )
+            
+        conn.commit()
+        curseur.close()
+        conn.close()
+        print("✅ [CLOUD POSTGRESQL] Tables initialisées et clés injectées avec succès !")
+    except Exception as e:
+        print(f"❌ [ERREUR INITIALISATION POSTGRESQL] : {e}")
+
+# Déclenchement automatique de la création des tables au lancement de l'API
+initialiser_tables_postgresql_cloud()
+
+
 
 
 DOSSIER_DU_FICHIER = os.path.dirname(os.path.abspath(__file__))
