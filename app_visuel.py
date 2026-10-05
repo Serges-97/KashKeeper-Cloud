@@ -79,7 +79,7 @@ def lancer_thread_synchronisation_asynchrone():
                 logging.warning("Moteur hybride asynchrone hors-ligne - Attente connexion : %s", error_db)
             
             # Vérification toutes les 30 secondes
-            time.sleep(30)
+            import time as time_system; time_system.sleep(30) 
 
     thread_sync = threading.Thread(target=boucle_synchro_hybride, daemon=True)
     thread_sync.start()
