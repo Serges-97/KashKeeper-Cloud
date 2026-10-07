@@ -1986,8 +1986,14 @@ def rafraichir_donnees_locales_depuis_cloud():
                 conn = sqlite3.connect(data_base.DB_NAME)
                 conn.execute("DELETE FROM produits") # On vide l'ancien stock local
                 for art in articles:
+                    # Sécurisation du format de lecture : lit l'index si c'est une liste, ou la clé si c'est un dict
+                    nom_art = art[0] if isinstance(art, list) else art.get("article")
+                    desc_art = art[1] if isinstance(art, list) else art.get("description_unique")
+                    prix_art = art[2] if isinstance(art, list) else art.get("prix_ht")
+                    qte_art = art[3] if isinstance(art, list) else art.get("quantite")
+                    
                     conn.execute("INSERT INTO produits (article, description_unique, prix_ht, quantite) VALUES (?, ?, ?, ?)", 
-                                 (art["article"], art["description_unique"], art["prix_ht"], art["quantite"]))
+                                 (nom_art, desc_art, prix_art, qte_art))
                 conn.commit()
                 conn.close()
 
@@ -1998,8 +2004,13 @@ def rafraichir_donnees_locales_depuis_cloud():
                 conn = sqlite3.connect(data_base.DB_NAME)
                 conn.execute("DELETE FROM employes WHERE role != 'gerant'") # Garde le gérant local
                 for emp in employes:
+                    user_emp = emp[0] if isinstance(emp, list) else emp.get("identifiant")
+                    pass_emp = emp[1] if isinstance(emp, list) else emp.get("mot_de_passe")
+                    role_emp = emp[2] if isinstance(emp, list) else emp.get("role")
+                    sal_emp = emp[3] if isinstance(emp, list) else emp.get("salaire")
+                    
                     conn.execute("INSERT INTO employes (identifiant, mot_de_passe, role, salaire) VALUES (?, ?, ?, ?)", 
-                                 (emp["identifiant"], emp["mot_de_passe"], emp["role"], emp["salaire"]))
+                                 (user_emp, pass_emp, role_emp, sal_emp))
                 conn.commit()
                 conn.close()
                 

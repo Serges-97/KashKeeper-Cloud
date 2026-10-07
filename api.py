@@ -408,21 +408,23 @@ def api_reception_webhook_campay(payload: dict):
 
 @app.get("/boutique/telecharger-stocks")
 def api_envoyer_stocks_aux_caissieres(x_api_key: str = Header(...)):
-    """Renvoie la liste complète des stocks enregistrés sur PostgreSQL pour cette boutique."""
+    """Renvoie la liste complète des stocks dans le format brut lu par app_visuel."""
     try:
         conn = obtenir_connexion_postgresql()
         curseur = conn.cursor()
         curseur.execute("SELECT article, description_unique, prix_ht, quantite FROM produits_cloud WHERE cle_boutique = %s", (x_api_key.strip(),))
-        articles = curseur.fetchall()
+        articles = curseur.fetchall() # Renvoie une liste de dictionnaires grâce à RealDictCursor
         curseur.close()
         conn.close()
-        return {"articles": articles}
+        # On extrait les valeurs sous forme de listes plates pour correspondre aux attentes du client local
+        liste_formatee = [[a["article"], a["description_unique"], a["prix_ht"], a["quantite"]] for a in articles]
+        return {"articles": liste_formatee}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/boutique/telecharger-employes")
 def api_envoyer_employes_aux_caissieres(x_api_key: str = Header(...)):
-    """Renvoie la liste des comptes caissières créés par le gérant à distance."""
+    """Renvoie la liste des employés dans le format attendu pour l'insertion SQLite."""
     try:
         conn = obtenir_connexion_postgresql()
         curseur = conn.cursor()
@@ -430,7 +432,8 @@ def api_envoyer_employes_aux_caissieres(x_api_key: str = Header(...)):
         employes = curseur.fetchall()
         curseur.close()
         conn.close()
-        return {"employes": employes}
+        liste_formatee = [[e["identifiant"], e["mot_de_passe"], e["role"], e["salaire"]] for e in employes]
+        return {"employes": liste_formatee}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
