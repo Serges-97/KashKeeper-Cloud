@@ -942,14 +942,29 @@ def ouvrir_comptoir_facturation():
     def rafraichir_stocks_depuis_cloud():
         if not URL_API_KASHFLOW or not CLE_API_KASHFLOW: return
         try:
-            reponse = requests.get(f"{URL_API_KASHFLOW}/stocks/etat", headers={"X-API-Key": CLE_API_KASHFLOW}, timeout=45)
+            # On interroge la route de distribution d'usine
+            reponse = requests.get(f"{URL_API_KASHFLOW}/boutique/telecharger-stocks", headers={"X-API-Key": CLE_API_KASHFLOW}, timeout=45)
             if reponse.status_code == 200:
-                for item in reponse.json().get("inventaire_magasin", []):
-                    art = item.get("article_modele", "")
-                    qte = item.get("quantite_restante", 0)
-                    if art: data_base.forcer_mise_a_jour_stock_local(art, qte)
+                articles = reponse.json().get("articles", [])
+                conn = sqlite3.connect(data_base.DB_NAME)
+                # On met à jour proprement la base SQLite locale
+                for item in articles:
+                    # Sécurité : prend l'index ou la clé selon le type
+                    art = item if isinstance(item, list) else item.get("article")
+                    qte = item if isinstance(item, list) else item.get("quantite")
+                    p_ht = item if isinstance(item, list) else item.get("prix_ht")
+                    desc = item if isinstance(item, list) else item.get("description_unique")
+                    
+                    conn.execute("""
+                        INSERT INTO produits (article, description_unique, prix_ht, quantite) 
+                        VALUES (?, ?, ?, ?)
+                        ON CONFLICT(article) DO UPDATE SET quantite = ?, prix_ht = ?, description_unique = ?
+                    """, (art, desc, p_ht, qte, qte, p_ht, desc))
+                conn.commit()
+                conn.close()
                 actualiser_liste_deroulante_smartphones()
-        except Exception as e: logging.warning("Erreur rafraîchissement stocks : %s", e)
+        except Exception as e: 
+            logging.warning("Erreur rafraîchissement stocks : %s", e)
 
     def actualiser_liste_deroulante_smartphones():
         try:
@@ -966,7 +981,8 @@ def ouvrir_comptoir_facturation():
         if comptoir.winfo_exists():
             threading.Thread(target=synchroniser_file_cloud, daemon=True).start()
             threading.Thread(target=rafraichir_stocks_depuis_cloud, daemon=True).start()
-            comptoir.after(30000, planifier_synchronisation_et_ecoute)
+            # 🟢 AUGMENTATION D'USINE : Vérification toutes les 2 minutes pour éviter d'être banni par Render
+            comptoir.after(120000, planifier_synchronisation_et_ecoute)
 
     threading.Thread(target=synchroniser_file_cloud, daemon=True).start()
     threading.Thread(target=rafraichir_stocks_depuis_cloud, daemon=True).start()
