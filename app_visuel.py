@@ -1510,7 +1510,7 @@ def ouvrir_historique_caissiere():
 
 # --- LOGIQUE SÉCURITÉ COMPTOIR : VERIFICATION DES ACCÈS ET CONTRÔLE DE LICENCE SAAS ---
 def verifier_acces():
-    """Valide la session employé et applique le contrôle de licence SaaS bloquant et inviolable."""
+    """Valide la session employé en rafraîchissant d'abord le miroir local depuis le Cloud."""
     global SESSION_UTILISATEUR, NOM_CAISSIERE_ACTIVE
     user = entree_user.get().strip().lower()
     pwd = entree_password.get().strip()
@@ -1523,7 +1523,11 @@ def verifier_acces():
         # Allumage préventif des structures locales
         data_base.initialisation_systeme()
 
-        # Lecture immédiate en base de données pour vérifier l'état d'avancement
+        # 🟢 CORRECTION CRITIQUE N°1 : On rafraîchit d'abord la base locale SQLite avec les données Cloud
+        # Ainsi, si le gérant a créé "caissiere1" à distance, elle est immédiatement téléchargée ici !
+        rafraichir_donnees_locales_depuis_cloud()
+
+        # Lecture immédiate en base de données locale pour vérifier l'état d'avancement
         connexion = sqlite3.connect(data_base.DB_NAME)
         curseur = connexion.cursor()
         curseur.execute("SELECT mot_de_passe FROM employes WHERE identifiant = 'gerant'")
@@ -1536,12 +1540,12 @@ def verifier_acces():
         mot_de_passe_actuel_db = ligne_pwd[0] if ligne_pwd else "serge2026"
         boutique_installee = ligne_boutique is not None
 
-        # 🟢 CAS 1 : Premier démarrage de l'histoire du logiciel (Le gérant doit taper serge2026)
+        # 🟢 CAS 1 : Premier démarrage de l'histoire du logiciel sur le PC du client
         if not boutique_installee and mot_de_passe_actuel_db == "serge2026":
             if user == "gerant" and pwd == "serge2026":
                 nom_magasin = simpledialog.askstring("Configuration Boutique - Étape 1/2", "Bienvenue chez KashKeeper !\n\nVeuillez entrer le NOM OFFICIEL de votre entreprise :")
                 if not nom_magasin or not nom_magasin.strip():
-                    messagebox.showwarning("Incomplet", "un nom est exiger pour l'entreprise ou la boutique")
+                    messagebox.showwarning("Incomplet", "Un nom est exigé pour l'entreprise ou la boutique")
                     return
 
                 creer_code = simpledialog.askstring("Configuration Boutique - Étape 2/2", "Veuillez définir votre MOT DE PASSE personnalisé définitif :")
@@ -1549,25 +1553,28 @@ def verifier_acces():
                     messagebox.showerror("Erreur", "Le mot de passe exige un minimum de 6 caractères.")
                     return
 
-                # Écrasement définitif des paramètres d'usine par défaut
                 data_base.enregistrer_nom_boutique_sql(nom_magasin.strip())
                 data_base.configurer_compte_gerant_sql(creer_code.strip())
                 
-                messagebox.showinfo("Succès", f"Félicitations !\nL'entreprise '{nom_magasin.strip().upper()}' est activée.\n\nConnectez-vous maintenant avec votre nouveau mot de passe.")
+                # On pousse directement les configurations d'allumage vers le Cloud Postgres
+                try:
+                    payload_init = {"identifiant": "caissiere1", "mot_de_passe": "1234", "role": "caissiere", "salaire": 50000}
+                    requests.post(f"{URL_API_KASHFLOW}/licence/enregistrer-employe-cloud", json=payload_init, headers={"X-API-Key": CLE_API_KASHFLOW}, timeout=10)
+                except Exception: pass
+
+                messagebox.showinfo("Succès", f"Félicitations !\nL'entreprise '{nom_magasin.strip().upper()}' est activée.\n\nConnectez-vous maintenant.")
                 entree_password.delete(0, tk.END)
                 entree_password.focus()
                 return
             else:
-                messagebox.showerror("Accès Refusé", "Code d'initialisation d'usine incorrect.\n\nVeuillez entrer le mot de passe de sécurité par défaut.")
+                messagebox.showerror("Accès Refusé", "Code d'initialisation d'usine incorrect.")
                 return
 
-        # 🛑 PROTECTION REPARÉE : Si le mot de passe n'est plus serge2026, l'accès avec ce code est banni
         if pwd == "serge2026" and mot_de_passe_actuel_db != "serge2026":
             messagebox.showerror("Accès Refusé", "Ce mot de passe d'usine a expiré après la configuration initiale.")
             return
 
-        # 🟢 CAS 2 : Utilisation quotidienne classique avec contrôle de licence SaaS bloquant
-        # 🛡️ INTERCONNEXION SAAS BLINDÉE : Appel de licence avec bascule sur la clé de secours manuelle
+        # 🟢 CAS 2 : Utilisation quotidienne (La caissière ou le gérant s'identifient sur la base fraîchement synchronisée)
         if data_base.verifier_identifiants_sql(user, pwd):
             autorisation_ouvrir_comptoir = True
             
@@ -1579,7 +1586,6 @@ def verifier_acces():
                     jours_restants = infos.get("jours_restants", 0)
 
                     if statut_serveur == "expire":
-                        # 🟢 BASCULE SÉCURISÉE : Si le Cloud dit expiré, on vérifie si le gérant a un code d'activation WhatsApp local valide
                         conn = sqlite3.connect(data_base.DB_NAME)
                         row_secours = conn.execute("SELECT valeur FROM configuration WHERE cle = 'licence_secours_expire'").fetchone()
                         conn.close()
@@ -1587,15 +1593,14 @@ def verifier_acces():
                         autorisation_ouvrir_comptoir = False
                         if row_secours:
                             date_exp_secours = datetime.strptime(row_secours[0], "%d/%m/%Y")
-                            # Si la date de la clé de secours est toujours supérieure ou égale à aujourd'hui, on autorise l'accès !
                             if (date_exp_secours - datetime.now()).days >= 0:
                                 autorisation_ouvrir_comptoir = True
                         
                         if not autorisation_ouvrir_comptoir:
-                            messagebox.showerror("Abonnement Expiré", "🚨 COMPTOIR SÉCURISÉ VERROUILLÉ !\n\nVotre période d'abonnement est terminée.\nVeuillez régulariser manuellement via le bouton 'CONTACT SUPPORT' ou 'PAYER ABONNEMENT'.")
+                            messagebox.showerror("Abonnement Expiré", "🚨 COMPTOIR SÉCURISÉ VERROUILLÉ !")
                             return 
                     elif statut_serveur == "grace":
-                        messagebox.showwarning("Avertissement Grâce", f"⚠️ MODE TOLÉRANCE ACTIF :\n\nVotre licence a expiré. Il vous reste {jours_restants} jour(s) de grâce avant blocage total du système.")
+                        messagebox.showwarning("Avertissement Grâce", f"⚠️ MODE TOLÉRANCE ACTIF :\nIl vous reste {jours_restants} jour(s) avant blocage.")
             except Exception as e:
                 logging.warning("Liaison contrôle licence asynchrone hors-ligne : %s", e)
 
@@ -1604,9 +1609,10 @@ def verifier_acces():
                 NOM_CAISSIERE_ACTIVE = str(user).strip().lower()
                 messagebox.showinfo("Accès Autorisé", f"Bienvenue {SESSION_UTILISATEUR.upper()} !")
                 FENETRE_PRINCIPALE_LOGIN.withdraw()
-                rafraichir_donnees_locales_depuis_cloud() 
+                # 🟢 NOTE : rafraichir_donnees_locales_depuis_cloud() ayant déjà été exécuté au début, on lance directement les structures d'écoute
                 lancer_thread_synchronisation_asynchrone()
                 ouvrir_comptoir_facturation()
+
 
         else:
             messagebox.showerror("Accès Refusé", "Identifiant ou mot de passe incorrect.")
@@ -2000,16 +2006,18 @@ def rafraichir_donnees_locales_depuis_cloud():
             if rep_stocks.status_code == 200:
                 articles = rep_stocks.json().get("articles", [])
                 conn = sqlite3.connect(data_base.DB_NAME)
-                conn.execute("DELETE FROM produits") # On vide l'ancien stock local
+                
+                # On vide l'ancien registre local pour accueillir le miroir du gérant
+                conn.execute("DELETE FROM stocks") 
                 for art in articles:
-                    # Sécurisation du format de lecture : lit l'index si c'est une liste, ou la clé si c'est un dict
+                    # Extraction stricte alignée avec le dictionnaire PostgreSQL
                     nom_art = art[0] if isinstance(art, list) else art.get("article")
-                    desc_art = art[1] if isinstance(art, list) else art.get("description_unique")
                     prix_art = art[2] if isinstance(art, list) else art.get("prix_ht")
                     qte_art = art[3] if isinstance(art, list) else art.get("quantite")
                     
-                    conn.execute("INSERT INTO produits (article, description_unique, prix_ht, quantite) VALUES (?, ?, ?, ?)", 
-                                 (nom_art, desc_art, prix_art, qte_art))
+                    # 🟢 ALIGNEMENT ABSOLU : Insertion stricte dans les 3 colonnes réelles de ta BD (modele, quantite_dispo, prix_achat)
+                    conn.execute("INSERT INTO stocks (modele, quantite_dispo, prix_achat) VALUES (?, ?, ?)", 
+                                 (nom_art, qte_art, prix_art))
                 conn.commit()
                 conn.close()
 
