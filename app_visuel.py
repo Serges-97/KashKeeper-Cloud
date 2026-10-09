@@ -66,7 +66,7 @@ def lancer_thread_synchronisation_asynchrone():
                                 f"{URL_API_KASHFLOW}/ventes/synchroniser",
                                 json=payload,
                                 headers={"X-API-Key": CLE_API_KASHFLOW},
-                                timeout=45
+                                timeout=15
                             )
                             if reponse.status_code == 200:
                                 # 3. Si Render PostgreSQL a enregistré, on valide localement (synchro = 1)
@@ -295,7 +295,7 @@ def ouvrir_panneau_stock():
         p_achat_txt = entree_prix_achat_stock.get().strip()
             
         if not all([modele, qte_texte, p_achat_txt]):
-            messagebox.showwarning("Champs vides", "Veuillez remplir le modèle, la quantité and le prix d'achat.")
+            messagebox.showwarning("Champs vides", "Veuillez remplir le modèle, la quantité et le prix d'achat.")
             return
                 
         try:
@@ -303,27 +303,33 @@ def ouvrir_panneau_stock():
             p_achat = float(p_achat_txt)
             if qte <= 0 or p_achat < 0: raise ValueError
                 
+            # 🟢 ENVOI EN DIRECT SUR L'API RENDER POUR ENREGISTRER LE PRODUIT DANS LE POSTGRESQL GLOBAL
+            if URL_API_KASHFLOW and CLE_API_KASHFLOW:
+                payload_produit = {
+                    "article": modele,
+                    "description_unique": "Stock Initial Pro",
+                    "prix_ht": p_achat,
+                    "quantite": qte
+                }
+                # Appel en tâche de fond pour ne pas bloquer l'écran
+                threading.Thread(target=lambda: requests.post(
+                    f"{URL_API_KASHFLOW}/stocks/mettre_a_jour", 
+                    json={"modele": modele, "quantite_dispo": qte, "prix_achat": p_achat}, 
+                    headers={"X-API-Key": CLE_API_KASHFLOW}, 
+                    timeout=10
+                ), daemon=True).start()
+
             connexion = sqlite3.connect(data_base.DB_NAME)
             curseur = connexion.cursor()
             curseur.execute("""
             INSERT INTO stocks (modele, quantite_dispo, prix_achat) VALUES (?, ?, ?)
             ON CONFLICT(modele) DO UPDATE SET quantite_dispo = quantite_dispo + ?, prix_achat = ?
             """, (modele, qte, p_achat, qte, p_achat))
-            
-            curseur.execute("SELECT quantite_dispo FROM stocks WHERE lower(modele) = ?", (modele,))
-            row_fetch = curseur.fetchone()
-            
-            # 🟢 CORRIGÉ : On extrait le chiffre brut à l'index 0 pour éviter l'erreur int() argument must be a string
-            qte_totale = int(row_fetch[0]) if row_fetch else qte
             connexion.commit()
             connexion.close()
             
-            pushing_stock_cloud_complet(modele, qte_totale, p_achat)
-            
-            messagebox.showinfo("Inventaire Mis à jour", f"L'article '{modele.upper()}' a été enregistré !")
-            entree_modele.delete(0, tk.END)
-            entree_qte_stock.delete(0, tk.END)
-            entree_prix_achat_stock.delete(0, tk.END)
+            messagebox.showinfo("Inventaire Mis à jour", f"L'article '{modele.upper()}' a été enregistré et synchronisé sur le Cloud !")
+            entree_modele.delete(0, tk.END); entree_qte_stock.delete(0, tk.END); entree_prix_achat_stock.delete(0, tk.END)
             rafraichir_tableau()
             entree_modele.focus()
         except ValueError:
@@ -943,7 +949,7 @@ def ouvrir_comptoir_facturation():
         if not URL_API_KASHFLOW or not CLE_API_KASHFLOW: return
         try:
             # On interroge la route de distribution d'usine
-            reponse = requests.get(f"{URL_API_KASHFLOW}/boutique/telecharger-stocks", headers={"X-API-Key": CLE_API_KASHFLOW}, timeout=45)
+            reponse = requests.get(f"{URL_API_KASHFLOW}/boutique/telecharger-stocks", headers={"X-API-Key": CLE_API_KASHFLOW}, timeout=15)
             if reponse.status_code == 200:
                 articles = reponse.json().get("articles", [])
                 conn = sqlite3.connect(data_base.DB_NAME)
@@ -982,7 +988,7 @@ def ouvrir_comptoir_facturation():
             threading.Thread(target=synchroniser_file_cloud, daemon=True).start()
             threading.Thread(target=rafraichir_stocks_depuis_cloud, daemon=True).start()
             # 🟢 AUGMENTATION D'USINE : Vérification toutes les 2 minutes pour éviter d'être banni par Render
-            comptoir.after(120000, planifier_synchronisation_et_ecoute)
+            comptoir.after(30000, planifier_synchronisation_et_ecoute)
 
     threading.Thread(target=synchroniser_file_cloud, daemon=True).start()
     threading.Thread(target=rafraichir_stocks_depuis_cloud, daemon=True).start()
@@ -1579,7 +1585,7 @@ def verifier_acces():
             autorisation_ouvrir_comptoir = True
             
             try:
-                reponse_licence = requests.get(f"{URL_API_KASHFLOW}/licence/statut", headers={"X-API-Key": CLE_API_KASHFLOW}, timeout=45)
+                reponse_licence = requests.get(f"{URL_API_KASHFLOW}/licence/statut", headers={"X-API-Key": CLE_API_KASHFLOW}, timeout=15)
                 if reponse_licence.status_code == 200:
                     infos = reponse_licence.json()
                     statut_serveur = infos.get("statut", "actif")
@@ -1697,7 +1703,7 @@ def action_telecharger_mise_a_jour():
         reponse = requests.get(
             f"{URL_API_KASHFLOW}/systeme/mise-a-jour",
             headers={"X-API-Key": CLE_API_KASHFLOW},
-            timeout=45
+            timeout=15
         )
         
         if reponse.status_code == 200:
@@ -1736,7 +1742,7 @@ def ouvrir_fenetre_paiement():
         fenetre_paye.update_idletasks()
 
         try:
-            reponse = requests.post(f"{URL_API_KASHFLOW}/licence/collecter-momo", json={"numero": num_momo}, headers={"X-API-Key": CLE_API_KASHFLOW}, timeout=45)
+            reponse = requests.post(f"{URL_API_KASHFLOW}/licence/collecter-momo", json={"numero": num_momo}, headers={"X-API-Key": CLE_API_KASHFLOW}, timeout=15)
             if reponse.status_code == 200:
                 donnees = reponse.json()
                 if donnees.get("statut") == "SUCCESS_CARD":
@@ -1974,7 +1980,7 @@ def lancer_moteur_hybride_synchro_cloud():
                         f"{URL_API_KASHFLOW}/sync/ventes_magasin",
                         json={"ventes": paquet_ventes},
                         headers={"X-API-Key": CLE_API_KASHFLOW},
-                        timeout=45
+                        timeout=15
                     )
                     
                     # 3. Si Render PostgreSQL valide, on marque synchro = 1 en local pour ne plus les renvoyer
@@ -2006,17 +2012,13 @@ def rafraichir_donnees_locales_depuis_cloud():
             if rep_stocks.status_code == 200:
                 articles = rep_stocks.json().get("articles", [])
                 conn = sqlite3.connect(data_base.DB_NAME)
-                
-                # On vide l'ancien registre local pour accueillir le miroir du gérant
                 conn.execute("DELETE FROM stocks") 
                 for art in articles:
-                    # Extraction stricte alignée avec le dictionnaire PostgreSQL
                     nom_art = art[0] if isinstance(art, list) else art.get("article")
                     prix_art = art[2] if isinstance(art, list) else art.get("prix_ht")
                     qte_art = art[3] if isinstance(art, list) else art.get("quantite")
                     
-                    # 🟢 ALIGNEMENT ABSOLU : Insertion stricte dans les 3 colonnes réelles de ta BD (modele, quantite_dispo, prix_achat)
-                    conn.execute("INSERT INTO stocks (modele, quantite_dispo, prix_achat) VALUES (?, ?, ?)", 
+                    conn.execute("INSERT INTO stocks (modele, quantite_dispo, prix_achat, ventes_cumulees) VALUES (?, ?, ?, 0)", 
                                  (nom_art, qte_art, prix_art))
                 conn.commit()
                 conn.close()
@@ -2026,15 +2028,19 @@ def rafraichir_donnees_locales_depuis_cloud():
             if rep_emp.status_code == 200:
                 employes = rep_emp.json().get("employes", [])
                 conn = sqlite3.connect(data_base.DB_NAME)
-                conn.execute("DELETE FROM employes WHERE role != 'gerant'") # Garde le gérant local
+                
+                # 🟢 ALIGNEMENT STRUCTUREL : On supprime toutes les caissières locales pour accueillir le miroir du Cloud
+                # (On utilise 'WHERE identifiant != 'gerant' pour préserver l'accès du gérant local)
+                conn.execute("DELETE FROM employes WHERE identifiant != 'gerant'") 
+                
                 for emp in employes:
                     user_emp = emp[0] if isinstance(emp, list) else emp.get("identifiant")
                     pass_emp = emp[1] if isinstance(emp, list) else emp.get("mot_de_passe")
-                    role_emp = emp[2] if isinstance(emp, list) else emp.get("role")
                     sal_emp = emp[3] if isinstance(emp, list) else emp.get("salaire")
                     
-                    conn.execute("INSERT INTO employes (identifiant, mot_de_passe, role, salaire) VALUES (?, ?, ?, ?)", 
-                                 (user_emp, pass_emp, role_emp, sal_emp))
+                    # 🟢 INJECTION STRICTE : Aligné à 100% avec les colonnes de ton data_base.py (identifiant, mot_de_passe, applique_tva, salaire)
+                    conn.execute("INSERT INTO employes (identifiant, mot_de_passe, applique_tva, salaire) VALUES (?, ?, 1, ?)", 
+                                 (user_emp, pass_emp, sal_emp))
                 conn.commit()
                 conn.close()
                 
