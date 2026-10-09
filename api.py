@@ -515,6 +515,90 @@ def api_enregistrer_nouveau_produit_postgres(payload: dict, x_api_key: str = Hea
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erreur d'écriture produits Postgres : {str(e)}")
 
+@app.get("/ventes/historique-cloud/{nom_caissiere}", dependencies=[Depends(verifier_cle_api)])
+def api_recuperer_ventes_caissiere_cloud(nom_caissiere: str, x_api_key: str = Header(...)):
+    """Extrait l'historique complet d'une caissière depuis PostgreSQL pour le gérant à distance."""
+    cle_boutique = x_api_key.strip()
+    try:
+        conn = obtenir_connexion_postgresql()
+        curseur = conn.cursor()
+        
+        # On va chercher toutes les ventes associées à ce client et à cette vendeuse
+        curseur.execute("""
+            SELECT id_local, client, article, description_unique, montant_ht, tva, total_ttc, caissiere, date_vente 
+            FROM ventes_cloud_gerant 
+            WHERE cle_boutique = %s AND LOWER(caissiere) = %s
+            ORDER BY id DESC
+        """, (cle_boutique, nom_caissiere.strip().lower()))
+        
+        ventes = curseur.fetchall()
+        curseur.close()
+        conn.close()
+        return {"ventes": ventes}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erreur d'extraction cloud : {str(e)}")
+# 🟢 À METTRE TOUT EN BAS DE API.PY
+@app.post("/licence/enregistrer-employe-cloud", dependencies=[Depends(verifier_cle_api)])
+def api_enregistrer_employe_sur_postgres(payload: dict, x_api_key: str = Header(...)):
+    """Reçoit une fiche employé depuis la machine gérant et l'enregistre sur PostgreSQL Cloud."""
+    cle_boutique = x_api_key.strip()
+    identifiant = payload.get("identifiant", "").strip().lower()
+    mot_de_passe = payload.get("mot_de_passe", "").strip()
+    role = payload.get("role", "caissiere").strip().lower()
+    salaire = float(payload.get("salaire", 0.0))
+    
+    if not identifiant or not mot_de_passe:
+        raise HTTPException(status_code=400, detail="Identifiant et mot de passe requis.")
+        
+    try:
+        conn = obtenir_connexion_postgresql()
+        curseur = conn.cursor()
+        
+        # Vérification si l'employé existe déjà pour cette boutique dans le Cloud
+        curseur.execute("SELECT 1 FROM employes_cloud WHERE cle_boutique = %s AND identifiant = %s", (cle_boutique, identifiant))
+        existe = curseur.fetchone()
+        
+        if existe:
+            # Si le compte existe, on met à jour le mot de passe et le salaire
+            curseur.execute("""
+                UPDATE employes_cloud 
+                SET mot_de_passe = %s, salaire = %s 
+                WHERE cle_boutique = %s AND identifiant = %s
+            """, (mot_de_passe, salaire, cle_boutique, identifiant))
+        else:
+            # Sinon, on crée la nouvelle fiche de personnel dans le Cloud
+            curseur.execute("""
+                INSERT INTO employes_cloud (cle_boutique, identifiant, mot_de_passe, role, salaire)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (cle_boutique, identifiant, mot_de_passe, role, salaire))
+            
+        conn.commit()
+        curseur.close()
+        conn.close()
+        return {"statut": "Succès", "message": f"Compte de {identifiant.upper()} synchronisé au Cloud !"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erreur d'écriture personnel Postgres : {str(e)}")
+# 🟢 À COLLER TOUT EN BAS DE API.PY (VÉRIFIE QUE C'EST BIEN JUSTE APRÈS LA ROUTE ENREGISTRER-EMPLOYE-CLOUD)
+@app.post("/licence/supprimer-employe-cloud", dependencies=[Depends(verifier_cle_api)])
+def api_supprimer_employe_sur_postgres(payload: dict, x_api_key: str = Header(...)):
+    """Supprime définitivement un employé du Cloud PostgreSQL sur ordre explicite du gérant."""
+    cle_boutique = x_api_key.strip()
+    identifiant = payload.get("identifiant", "").strip().lower()
+    
+    if not identifiant:
+        raise HTTPException(status_code=400, detail="Identifiant de l'employé requis.")
+        
+    try:
+        conn = obtenir_connexion_postgresql()
+        curseur = conn.cursor()
+        curseur.execute("DELETE FROM employes_cloud WHERE cle_boutique = %s AND identifiant = %s", (cle_boutique, identifiant))
+        conn.commit()
+        curseur.close()
+        conn.close()
+        return {"statut": "Succès", "message": f"Employé {identifiant.upper()} révoqué du Cloud avec succès."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erreur de suppression Postgres : {str(e)}")
+
 
 @app.get("/serge/generateur", response_class=HTMLResponse)
 def page_generateur_visuel_en_dur(cle_client: str = None, mois: int = None, annee: int = None):

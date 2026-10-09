@@ -374,31 +374,28 @@ def ouvrir_panneau_stock():
         if not messagebox.askyesno("Suppression Définitive", f"🚨 ATTENTION :\nVoulez-vous supprimer définitivement « {nom_article} » ?"): 
             return
 
-        # Suppression locale SQLite
-        connexion = sqlite3.connect(data_base.DB_NAME)
-        connexion.execute("DELETE FROM stocks WHERE id = ?", (id_unique_ligne,))
-        connexion.commit()
-        connexion.close()
+        try:
+            # 1. Élimination de la base de données SQLite locale de ta machine
+            connexion = sqlite3.connect(data_base.DB_NAME)
+            connexion.execute("DELETE FROM stocks WHERE id = ?", (id_unique_ligne,))
+            connexion.commit()
+            connexion.close()
 
-        # 🟢 APPEL DE LA ROUTE DE SUPPRESSION DÉFINITIVE SUR RENDER
-        if URL_API_KASHFLOW and CLE_API_KASHFLOW:
-            payload_suppr = {"modele": str(nom_article).lower()}
-            threading.Thread(target=lambda: requests.post(f"{URL_API_KASHFLOW}/stocks/supprimer_definitif", json=payload_suppr, headers={"X-API-Key": CLE_API_KASHFLOW}, timeout=10), daemon=True).start()
+            # 2. 🟢 IMPACT CLOUD : Retrait instantané de la base PostgreSQL globale
+            if URL_API_KASHFLOW and CLE_API_KASHFLOW:
+                payload_suppr = {"modele": str(nom_article).lower().strip()}
+                threading.Thread(target=lambda: requests.post(
+                    f"{URL_API_KASHFLOW}/stocks/supprimer_definitif", 
+                    json=payload_suppr, 
+                    headers={"X-API-Key": CLE_API_KASHFLOW}, 
+                    timeout=10
+                ), daemon=True).start()
 
-        messagebox.showinfo("Succès", "L'article a été supprimé définitivement !")
-        rafraichir_tableau()
-
-        connexion = sqlite3.connect(data_base.DB_NAME)
-        curseur = connexion.cursor()
-        curseur.execute("DELETE FROM stocks WHERE id = ?", (id_unique_ligne,))
-        article_supprime = curseur.rowcount > 0
-        connexion.commit()
-        connexion.close()
-
-        if article_supprime:
-            pushing_stock_cloud_complet(str(nom_article).lower(), 0, 0)
-            messagebox.showinfo("Succès", "d'article retirée avec succès.")
+            messagebox.showinfo("Succès", "L'article a été supprimé définitivement partout !")
             rafraichir_tableau()
+        except Exception as e:
+            messagebox.showerror("Erreur", f"Erreur lors de la suppression : {e}")
+
 
     def action_clic_bouton_quantite():
         selection = tableau_stocks.selection()
@@ -825,7 +822,6 @@ def ouvrir_panneau_employes():
         nom = entree_emp_nom.get().strip().lower()
         mdp = entree_emp_mdp.get().strip()
         sal_txt = entree_emp_sal.get().strip()
-        # 🟢 RÉCUPÉRATION DU CHOIX TVA : 1 si coché, 0 si décoché
         tva_statut = 1 if var_applique_tva_rh.get() else 0
         
         if not all([nom, mdp, sal_txt]):
@@ -833,15 +829,41 @@ def ouvrir_panneau_employes():
             return
         try:
             salaire = float(sal_txt)
-            # 🟢 CORRIGÉ : On passe dynamiquement tva_statut au moteur SQL d'origine
+            
+            # 1. On enregistre en priorité dans ta base SQLite locale
             if data_base.ajouter_nouvel_employe_sql(nom, mdp, tva_statut, salaire):
-                messagebox.showinfo("Succès", f"L'employé '{nom.upper()}' a été ajouté avec succès.")
+                
+                # 2. 🟢 PROPULSION SYNCHRONE VERS TON ENGIN CLOUD RENDER POSTGRESQL
+                if URL_API_KASHFLOW and CLE_API_KASHFLOW:
+                    payload_rh = {
+                        "identifiant": nom,
+                        "mot_de_passe": mdp,
+                        "role": "caissiere",
+                        "salaire": salaire
+                    }
+                    def propulser_rh_internet():
+                        try:
+                            requests.post(
+                                f"{URL_API_KASHFLOW}/licence/enregistrer-employe-cloud",
+                                json=payload_rh,
+                                headers={"X-API-Key": CLE_API_KASHFLOW},
+                                timeout=10
+                            )
+                            print(f"📡 [CLOUD] Personnel {nom.upper()} sauvegardé avec succès sur Postgres !")
+                        except Exception as e:
+                            print(f"⚠️ [CLOUD] Erreur d'expédition RH (Le compte reste en local) : {e}")
+                    
+                    threading.Thread(target=propulser_rh_internet, daemon=True).start()
+
+                messagebox.showinfo("Succès", f"L'employé '{nom.upper()}' a été ajouté localement et envoyé au Cloud !")
                 entree_emp_nom.delete(0, tk.END); entree_emp_mdp.delete(0, tk.END); entree_emp_sal.delete(0, tk.END)
-                var_applique_tva_rh.set(True) # Réinitialisation de la case à cocher
+                var_applique_tva_rh.set(True)
                 rafraichir_liste_employes()
                 entree_emp_nom.focus()
-            else: messagebox.showerror("Erreur", "Cet identifiant existe déjà.")
-        except ValueError: messagebox.showerror("Erreur", "Le salaire doit être un nombre valide.")
+            else: 
+                messagebox.showerror("Erreur", "Cet identifiant existe déjà.")
+        except ValueError: 
+            messagebox.showerror("Erreur", "Le salaire doit être un nombre valide.")
 
     def action_supprimer_employe_grille():
         selection = tableau_emp.selection()
@@ -850,12 +872,29 @@ def ouvrir_panneau_employes():
             return
         id_emp = selection[0]
         nom_emp = tableau_emp.item(id_emp)["values"][0]
-        if messagebox.askyesno("Confirmation", f"Voulez-vous licencier définitivement l'employé « {nom_emp} » ?"):
-            connexion = sqlite3.connect(data_base.DB_NAME)
-            connexion.execute("DELETE FROM employes WHERE id = ?", (id_emp,))
-            connexion.commit(); connexion.close()
-            messagebox.showinfo("Succès", "Employé retiré du registre.")
-            rafraichir_liste_employes()
+        
+        if messagebox.askyesno("RH - Licenciement", f"⚠️ ATTENTION :\nVoulez-vous révoquer définitivement le contrat de « {nom_emp} » ?"):
+            try:
+                # 1. Suppression locale SQLite de ton PC
+                connexion = sqlite3.connect(data_base.DB_NAME)
+                connexion.execute("DELETE FROM employes WHERE id = ?", (id_emp,))
+                connexion.commit()
+                connexion.close()
+
+                # 2. 🟢 IMPACT CLOUD : Suppression instantanée de la fiche sur PostgreSQL Render
+                if URL_API_KASHFLOW and CLE_API_KASHFLOW:
+                    payload_licenciement = {"identifiant": str(nom_emp).lower().strip()}
+                    threading.Thread(target=lambda: requests.post(
+                        f"{URL_API_KASHFLOW}/licence/supprimer-employe-cloud", 
+                        json=payload_licenciement, 
+                        headers={"X-API-Key": CLE_API_KASHFLOW}, 
+                        timeout=10
+                    ), daemon=True).start()
+
+                messagebox.showinfo("Succès", "L'employé a été retiré du registre local et révoqué du Cloud.")
+                rafraichir_liste_employes()
+            except Exception as e:
+                messagebox.showerror("Erreur", f"Échec de traitement RH : {e}")
 
     fenetre_emp = Toplevel(FENETRE_PRINCIPALE_LOGIN)
     fenetre_emp.title("👥 Administration des RH - Registre du Personnel")
