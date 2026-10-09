@@ -406,23 +406,24 @@ def api_reception_webhook_campay(payload: dict):
         return {"status": "Mis à jour"}
     return {"status": "Ignoré"}
 
-@app.get("/boutique/telecharger-stocks")
+# 🟢 APPLIQUE LA PROTECTION DE LICENCE SUR LES STOCKS :
+@app.get("/boutique/telecharger-stocks", dependencies=[Depends(verifier_cle_api)])
 def api_envoyer_stocks_aux_caissieres(x_api_key: str = Header(...)):
     """Renvoie la liste complète des stocks dans le format brut lu par app_visuel."""
     try:
         conn = obtenir_connexion_postgresql()
         curseur = conn.cursor()
         curseur.execute("SELECT article, description_unique, prix_ht, quantite FROM produits_cloud WHERE cle_boutique = %s", (x_api_key.strip(),))
-        articles = curseur.fetchall() # Renvoie une liste de dictionnaires grâce à RealDictCursor
+        articles = curseur.fetchall()
         curseur.close()
         conn.close()
-        # On extrait les valeurs sous forme de listes plates pour correspondre aux attentes du client local
         liste_formatee = [[a["article"], a["description_unique"], a["prix_ht"], a["quantite"]] for a in articles]
         return {"articles": liste_formatee}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/boutique/telecharger-employes")
+# 🟢 APPLIQUE LA PROTECTION DE LICENCE SUR LES EMPLOYÉS :
+@app.get("/boutique/telecharger-employes", dependencies=[Depends(verifier_cle_api)])
 def api_envoyer_employes_aux_caissieres(x_api_key: str = Header(...)):
     """Renvoie la liste des employés dans le format attendu pour l'insertion SQLite."""
     try:

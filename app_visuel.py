@@ -2020,7 +2020,7 @@ def rafraichir_donnees_locales_depuis_cloud():
         try:
             headers = {"X-API-Key": CLE_API_KASHFLOW}
             
-            # 1. Téléchargement et synchronisation des stocks
+            # 1. Téléchargement et synchronisation des stocks (CORRIGÉ AVEC HEADERS)
             rep_stocks = requests.get(f"{URL_API_KASHFLOW}/boutique/telecharger-stocks", headers=headers, timeout=45)
             if rep_stocks.status_code == 200:
                 articles = rep_stocks.json().get("articles", [])
@@ -2036,22 +2036,18 @@ def rafraichir_donnees_locales_depuis_cloud():
                 conn.commit()
                 conn.close()
 
-            # 2. Téléchargement et synchronisation des employés
+            # 2. Téléchargement et synchronisation des employés (CORRIGÉ AVEC HEADERS)
             rep_emp = requests.get(f"{URL_API_KASHFLOW}/boutique/telecharger-employes", headers=headers, timeout=45)
             if rep_emp.status_code == 200:
                 employes = rep_emp.json().get("employes", [])
                 conn = sqlite3.connect(data_base.DB_NAME)
                 
-                # 🟢 ALIGNEMENT STRUCTUREL : On supprime toutes les caissières locales pour accueillir le miroir du Cloud
-                # (On utilise 'WHERE identifiant != 'gerant' pour préserver l'accès du gérant local)
                 conn.execute("DELETE FROM employes WHERE identifiant != 'gerant'") 
-                
                 for emp in employes:
                     user_emp = emp[0] if isinstance(emp, list) else emp.get("identifiant")
                     pass_emp = emp[1] if isinstance(emp, list) else emp.get("mot_de_passe")
                     sal_emp = emp[3] if isinstance(emp, list) else emp.get("salaire")
                     
-                    # 🟢 INJECTION STRICTE : Aligné à 100% avec les colonnes de ton data_base.py (identifiant, mot_de_passe, applique_tva, salaire)
                     conn.execute("INSERT INTO employes (identifiant, mot_de_passe, applique_tva, salaire) VALUES (?, ?, 1, ?)", 
                                  (user_emp, pass_emp, sal_emp))
                 conn.commit()
