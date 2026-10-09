@@ -25,7 +25,7 @@ def obtenir_connexion_postgresql():
     return psycopg2.connect(DATABASE_URL_POSTGRES, cursor_factory=RealDictCursor)
 
 def initialiser_tables_postgresql_cloud():
-    """Prépare toutes les tables requises sur PostgreSQL Render au démarrage pour le contrôle total à distance."""
+    """Prépare toutes les tables requises sur PostgreSQL Render sans aucune donnée factice de test."""
     try:
         conn = obtenir_connexion_postgresql()
         curseur = conn.cursor()
@@ -40,7 +40,7 @@ def initialiser_tables_postgresql_cloud():
             );
         """)
         
-        # 2. Table de centralisation du catalogue des produits pour les caissières
+        # 2. Table du catalogue des produits cloud
         curseur.execute("""
             CREATE TABLE IF NOT EXISTS produits_cloud (
                 id SERIAL PRIMARY KEY,
@@ -52,7 +52,7 @@ def initialiser_tables_postgresql_cloud():
             );
         """)
 
-        # 3. Table de centralisation des fiches employés / caissières créées à distance
+        # 3. Table des fiches employés créées à distance
         curseur.execute("""
             CREATE TABLE IF NOT EXISTS employes_cloud (
                 id SERIAL PRIMARY KEY,
@@ -64,29 +64,19 @@ def initialiser_tables_postgresql_cloud():
             );
         """)
         
-        # Injection automatique des licences par défaut si elles n'existent pas
+        # 🟢 PROTECTION COMMERCIALE : Injection automatique de tes propres clés de licence par défaut (sans comptes factices)
         curseur.execute("SELECT 1 FROM abonnements_magasin WHERE cle_boutique = 'SERGE_TECH_998877';")
         if not curseur.fetchone():
-            curseur.execute("INSERT INTO abonnements_magasin (cle_boutique, date_expiration, statut_reglement) VALUES (%s, %s, %s);", ("SERGE_TECH_998877", "05/11/2026", "actif"))
+            curseur.execute("INSERT INTO abonnements_magasin (cle_boutique, date_expiration, statut_reglement) VALUES (%s, %s, %s);", ("SERGE_TECH_998877", "31/12/2026", "actif"))
             
         curseur.execute("SELECT 1 FROM abonnements_magasin WHERE cle_boutique = 'BOUTIQUE_1';")
         if not curseur.fetchone():
-            curseur.execute("INSERT INTO abonnements_magasin (cle_boutique, date_expiration, statut_reglement) VALUES (%s, %s, %s);", ("BOUTIQUE_1", "05/11/2026", "actif"))
-            
-        # 🟢 SIMULATION : Injection automatique de ton catalogue (tes 3 produits) pour le test de ton amie
-        curseur.execute("SELECT 1 FROM produits_cloud WHERE cle_boutique = 'BOUTIQUE_1';")
-        if not curseur.fetchone():
-            curseur.execute("INSERT INTO produits_cloud (cle_boutique, article, description_unique, prix_ht, quantite) VALUES (%s, %s, %s, %s, %s);", ("BOUTIQUE_1", "Iphone 12 Simple", "Stock Initial Pro", 350000, 3))
-            
-        # 🟢 SIMULATION : Injection automatique de son compte caissière de test
-        curseur.execute("SELECT 1 FROM employes_cloud WHERE cle_boutique = 'BOUTIQUE_1' AND identifiant = 'caissiere1';")
-        if not curseur.fetchone():
-            curseur.execute("INSERT INTO employes_cloud (cle_boutique, identifiant, mot_de_passe, role, salaire) VALUES (%s, %s, %s, %s, %s);", ("BOUTIQUE_1", "caissiere1", "1234", "caissiere", 50000))
+            curseur.execute("INSERT INTO abonnements_magasin (cle_boutique, date_expiration, statut_reglement) VALUES (%s, %s, %s);", ("BOUTIQUE_1", "15/11/2026", "actif"))
 
         conn.commit()
         curseur.close()
         conn.close()
-        print("✅ [CLOUD POSTGRESQL] Toutes les tables d'inventaire et de personnel ont été initialisées avec succès !")
+        print("✅ [CLOUD POSTGRESQL] Infrastructures prêtes à blanc pour la production commerciale !")
     except Exception as e:
         print(f"❌ [ERREUR INITIALISATION TABLES] : {e}")
 
@@ -227,19 +217,63 @@ def api_centraliser_vente(donnees: VenteSchemaReseau):
         return {"statut": "Synchronisé", "facture_id_cloud": num_facture}
     except Exception as e: raise HTTPException(status_code=500, detail=str(e))
 
+# 🟢 APPLIQUE CETTE LOGIQUE DANS API.PY (LIGNE 153+)
 @app.post("/stocks/mettre_a_jour", dependencies=[Depends(verifier_cle_api)])
-def api_mettre_a_jour_stock_central(stock: StockSchemaReseau):
+def api_mettre_a_jour_stock_central(stock: StockSchemaReseau, x_api_key: str = Header(...)):
+    """Reçoit la mise à jour absolue des stocks (quantités et prix) depuis le gérant et synchronise sur PostgreSQL Cloud."""
+    cle_boutique = x_api_key.strip()
+    modele_propre = stock.modele.strip().lower()
+    p_achat = stock.prix_achat if stock.prix_achat is not None else 0.0
+    
     try:
-        modele_propre = stock.modele.strip().lower()
-        if stock.quantite_dispo <= 0:
-            connexion = sqlite3.connect(data_base.DB_NAME)
-            connexion.execute("DELETE FROM stocks WHERE lower(modele) = ?", (modele_propre,))
-            connexion.commit(); connexion.close()
-            return {"statut": "Succès", "message": f"Article '{modele_propre}' supprimé."}
-        p_achat = stock.prix_achat if stock.prix_achat is not None else 0.0
-        data_base.forcer_mise_a_jour_stock_local_avec_prix(modele_propre, stock.quantite_dispo, p_achat)
-        return {"statut": "Succès", "message": f"Stock synchronisé."}
-    except Exception as e: raise HTTPException(status_code=500, detail=str(e))
+        conn = obtenir_connexion_postgresql()
+        curseur = conn.cursor()
+        
+        # Vérification si le produit existe déjà pour cette boutique sur le Cloud
+        curseur.execute("SELECT 1 FROM produits_cloud WHERE cle_boutique = %s AND article = %s", (cle_boutique, modele_propre))
+        existe = curseur.fetchone()
+        
+        if existe:
+            # 🟢 D'APRES TA LOGIQUE : On écrase l'ancienne quantité par la nouvelle valeur absolue du gérant (même si c'est 0)
+            curseur.execute("""
+                UPDATE produits_cloud 
+                SET quantite = %s, prix_ht = %s 
+                WHERE cle_boutique = %s AND article = %s
+            """, (stock.quantite_dispo, p_achat, cle_boutique, modele_propre))
+        else:
+            # Si le produit n'existe pas, on le crée à neuf
+            curseur.execute("""
+                INSERT INTO produits_cloud (cle_boutique, article, description_unique, prix_ht, quantite)
+                VALUES (%s, %s, 'Produit de Production', %s, %s)
+            """, (cle_boutique, modele_propre, p_achat, stock.quantite_dispo))
+            
+        conn.commit()
+        curseur.close()
+        conn.close()
+        return {"statut": "Succès", "message": f"Stock de {modele_propre.upper()} synchronisé à {stock.quantite_dispo} pcs sur le Cloud !"}
+    except Exception as e: 
+        raise HTTPException(status_code=500, detail=f"Erreur d'écriture Postgres : {str(e)}")
+
+# 🟢 AJOUTE CETTE NOUVELLE ROUTE EXCLUSIVEMENT POUR LE BOUTON SUPPRIMER DU GERANT
+@app.post("/stocks/supprimer_definitif", dependencies=[Depends(verifier_cle_api)])
+def api_supprimer_produit_definitif_cloud(payload: dict, x_api_key: str = Header(...)):
+    """Supprime définitivement un produit du Cloud uniquement sur ordre explicite du gérant."""
+    cle_boutique = x_api_key.strip()
+    modele_propre = payload.get("modele", "").strip().lower()
+    
+    if not modele_propre:
+        raise HTTPException(status_code=400, detail="Modèle manquant.")
+        
+    try:
+        conn = obtenir_connexion_postgresql()
+        curseur = conn.cursor()
+        curseur.execute("DELETE FROM produits_cloud WHERE cle_boutique = %s AND article = %s", (cle_boutique, modele_propre))
+        conn.commit()
+        curseur.close()
+        conn.close()
+        return {"statut": "Succès", "message": f"Article {modele_propre.upper()} retiré définitivement du Cloud."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/stocks/etat", dependencies=[Depends(verifier_cle_api)])
 def api_consulter_stocks_cloud():

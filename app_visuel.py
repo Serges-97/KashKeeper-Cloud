@@ -248,20 +248,28 @@ def ouvrir_panneau_stock():
         threading.Thread(target=lambda: requests.post(f"{URL_API_KASHFLOW}/stocks/mettre_a_jour", json=payload, headers={"X-API-Key": CLE_API_KASHFLOW}, timeout=6), daemon=True).start()
 
     def action_ajouter_quantite(id_stock_cible, nom_article_cible):
-        qte = simpledialog.askinteger("Réapprovisionnement", f"Quantité à ajouter pour « {str(nom_article_cible).upper()} » :", parent=admin_stock, minvalue=1)
-        if qte is None: return
+        qte_a_ajouter = simpledialog.askinteger("Réapprovisionnement", f"Quantité à ajouter pour « {str(nom_article_cible).upper()} » :", parent=admin_stock, minvalue=1)
+        if qte_a_ajouter is None: return
+
+        id_propre = id_stock_cible[0] if isinstance(id_stock_cible, (list, tuple)) else id_stock_cible
 
         connexion = sqlite3.connect(data_base.DB_NAME)
-        connexion.execute("UPDATE stocks SET quantite_dispo = quantite_dispo + ? WHERE id = ?", (qte, id_stock_cible))
-        row = connexion.execute("SELECT quantite_dispo, prix_achat FROM stocks WHERE id = ?", (id_stock_cible,)).fetchone()
-        qte_totale = row
-        p_achat = row
+        # 1. On applique l'ajout en local
+        connexion.execute("UPDATE stocks SET quantite_dispo = quantite_dispo + ? WHERE id = ?", (qte_a_ajouter, id_propre))
+        # 2. On récupère la nouvelle quantité cumulée totale
+        row = connexion.execute("SELECT quantite_dispo, prix_achat FROM stocks WHERE id = ?", (id_propre,)).fetchone()
+        qte_totale = row[0] if row else qte_a_ajouter
+        p_achat = row[1] if row else 0.0
         connexion.commit()
         connexion.close()
         
-        pushing_stock_cloud_complet(nom_article_cible.strip().lower(), qte_totale, p_achat)
+        # 3. 🟢 ON ENVOIE LA QUANTITÉ TOTALE MIROIR SUR LE CLOUD
+        if URL_API_KASHFLOW and CLE_API_KASHFLOW:
+            payload = {"modele": str(nom_article_cible).strip().lower(), "quantite_dispo": int(qte_totale), "prix_achat": float(p_achat)}
+            threading.Thread(target=lambda: requests.post(f"{URL_API_KASHFLOW}/stocks/mettre_a_jour", json=payload, headers={"X-API-Key": CLE_API_KASHFLOW}, timeout=10), daemon=True).start()
+            
         rafraichir_tableau()
-        messagebox.showinfo("Inventaire mis à jour", "Stock augmenté avec succès.")
+        messagebox.showinfo("Inventaire mis à jour", f"Le stock total a été augmenté à {qte_totale} pcs et synchronisé !")
 
     def rafraichir_tableau():
         for i in tableau_stocks.get_children():
@@ -303,7 +311,7 @@ def ouvrir_panneau_stock():
             p_achat = float(p_achat_txt)
             if qte <= 0 or p_achat < 0: raise ValueError
                 
-            # 🟢 ÉTAPE 1 (PRIORITAIRE) : Écriture immédiate et sécurisée dans la base SQLite locale
+            # 🟢 ÉTAPE 1 : Écriture immédiate dans la base SQLite locale (Priorité terrain)
             connexion = sqlite3.connect(data_base.DB_NAME)
             curseur = connexion.cursor()
             curseur.execute("""
@@ -313,20 +321,20 @@ def ouvrir_panneau_stock():
             connexion.commit()
             connexion.close()
             
-            # 🟢 ÉTAPE 2 : Mise à jour instantanée de l'écran du gérant
+            # Étape 2 : Rafraîchissement visuel instantané du tableau à l'écran
+            rafraichir_tableau()
             messagebox.showinfo("Inventaire Mis à jour", f"L'article '{modele.upper()}' a été enregistré localement avec succès !")
             entree_modele.delete(0, tk.END); entree_qte_stock.delete(0, tk.END); entree_prix_achat_stock.delete(0, tk.END)
-            rafraichir_tableau()
             entree_modele.focus()
 
-            # 🟢 ÉTAPE 3 : Propulsion asynchrone vers le Cloud Render (en arrière-plan)
+            # 🟢 ÉTAPE 3 : Propulsion Cloud synchrone au format de l'objet Pydantic StockSchemaReseau
             if URL_API_KASHFLOW and CLE_API_KASHFLOW:
                 payload_produit = {
                     "modele": modele,
                     "quantite_dispo": qte,
                     "prix_achat": p_achat
                 }
-                def envoi_cloud_invisible():
+                def envoi_cloud_securise():
                     try:
                         reponse = requests.post(
                             f"{URL_API_KASHFLOW}/stocks/mettre_a_jour", 
@@ -335,17 +343,18 @@ def ouvrir_panneau_stock():
                             timeout=15
                         )
                         if reponse.status_code == 200:
-                            print(f"📡 [CLOUD] Synchronisation réussie pour {modele.upper()}")
+                            print(f"📡 [CLOUD] Synchronisation d'inventaire réussie pour {modele.upper()}")
                         else:
-                            print(f"⚠️ [CLOUD] Erreur serveur code : {reponse.status_code}")
+                            print(f"⚠️ [CLOUD] Échec d'authentification ou de routage, code : {reponse.status_code}")
                     except Exception as e:
-                        print(f"📡 [CLOUD] Serveur injoignable, le produit reste en local : {e}")
+                        print(f"📡 [CLOUD] Mode asynchrone - Écrit en local uniquement : {e}")
                 
-                # On lance l'envoi dans un fil invisible pour que l'application reste ultra-rapide
-                threading.Thread(target=envoi_cloud_invisible, daemon=True).start()
+                # Exécution asynchrone pour ne pas faire geler l'interface graphique de la caisse
+                threading.Thread(target=envoi_cloud_securise, daemon=True).start()
 
         except ValueError:
             messagebox.showerror("Erreur", "Données numériques invalides.")
+
 
 
 # =====================================================================
@@ -357,14 +366,27 @@ def ouvrir_panneau_stock():
             messagebox.showwarning("Sélection manquante", "Sélectionnez une ligne dans le tableau à supprimer.")
             return
             
-        # 🟢 CORRIGÉ : Extraction de l'ID pour la suppression sans crash de tuple
         id_unique_ligne = selection[0]
         item = tableau_stocks.item(id_unique_ligne)
         valeurs = item["values"]
         nom_article = valeurs[0] if valeurs else "article"
 
-        if not messagebox.askyesno("Confirmation", f"Voulez-vous retirer uniquement la ligne « {nom_article} » de l'inventaire ?"): 
+        if not messagebox.askyesno("Suppression Définitive", f"🚨 ATTENTION :\nVoulez-vous supprimer définitivement « {nom_article} » ?"): 
             return
+
+        # Suppression locale SQLite
+        connexion = sqlite3.connect(data_base.DB_NAME)
+        connexion.execute("DELETE FROM stocks WHERE id = ?", (id_unique_ligne,))
+        connexion.commit()
+        connexion.close()
+
+        # 🟢 APPEL DE LA ROUTE DE SUPPRESSION DÉFINITIVE SUR RENDER
+        if URL_API_KASHFLOW and CLE_API_KASHFLOW:
+            payload_suppr = {"modele": str(nom_article).lower()}
+            threading.Thread(target=lambda: requests.post(f"{URL_API_KASHFLOW}/stocks/supprimer_definitif", json=payload_suppr, headers={"X-API-Key": CLE_API_KASHFLOW}, timeout=10), daemon=True).start()
+
+        messagebox.showinfo("Succès", "L'article a été supprimé définitivement !")
+        rafraichir_tableau()
 
         connexion = sqlite3.connect(data_base.DB_NAME)
         curseur = connexion.cursor()
@@ -375,7 +397,7 @@ def ouvrir_panneau_stock():
 
         if article_supprime:
             pushing_stock_cloud_complet(str(nom_article).lower(), 0, 0)
-            messagebox.showinfo("Succès", "Ligne d'article retirée avec succès.")
+            messagebox.showinfo("Succès", "d'article retirée avec succès.")
             rafraichir_tableau()
 
     def action_clic_bouton_quantite():
@@ -961,29 +983,31 @@ def ouvrir_comptoir_facturation():
     def rafraichir_stocks_depuis_cloud():
         if not URL_API_KASHFLOW or not CLE_API_KASHFLOW: return
         try:
-            # On interroge la route de distribution d'usine
+            # 🟢 1. Appel sécurisé avec le X-API-Key (Ce que tu viens de faire)
             reponse = requests.get(f"{URL_API_KASHFLOW}/boutique/telecharger-stocks", headers={"X-API-Key": CLE_API_KASHFLOW}, timeout=15)
             if reponse.status_code == 200:
                 articles = reponse.json().get("articles", [])
                 conn = sqlite3.connect(data_base.DB_NAME)
-                # On met à jour proprement la base SQLite locale
+                
+                # 🟢 2. CORRIGÉ : On vide la table 'stocks' (Pas 'produits')
+                conn.execute("DELETE FROM stocks") 
                 for item in articles:
-                    # Sécurité : prend l'index ou la clé selon le type
-                    art = item if isinstance(item, list) else item.get("article")
-                    qte = item if isinstance(item, list) else item.get("quantite")
-                    p_ht = item if isinstance(item, list) else item.get("prix_ht")
-                    desc = item if isinstance(item, list) else item.get("description_unique")
+                    art = item[0] if isinstance(item, list) else item.get("article")
+                    desc = item[1] if isinstance(item, list) else item.get("description_unique")
+                    p_ht = item[2] if isinstance(item, list) else item.get("prix_ht")
+                    qte = item[3] if isinstance(item, list) else item.get("quantite")
                     
+                    # 🟢 3. CORRIGÉ : On insère dans la structure d'origine de ton data_base.py
                     conn.execute("""
-                        INSERT INTO produits (article, description_unique, prix_ht, quantite) 
-                        VALUES (?, ?, ?, ?)
-                        ON CONFLICT(article) DO UPDATE SET quantite = ?, prix_ht = ?, description_unique = ?
-                    """, (art, desc, p_ht, qte, qte, p_ht, desc))
+                        INSERT INTO stocks (modele, quantite_dispo, prix_achat, ventes_cumulees) 
+                        VALUES (?, ?, ?, 0)
+                    """, (art, qte, p_ht))
                 conn.commit()
                 conn.close()
                 actualiser_liste_deroulante_smartphones()
         except Exception as e: 
             logging.warning("Erreur rafraîchissement stocks : %s", e)
+
 
     def actualiser_liste_deroulante_smartphones():
         try:
