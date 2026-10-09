@@ -439,20 +439,20 @@ def api_envoyer_employes_aux_caissieres(x_api_key: str = Header(...)):
 
 @app.post("/stocks/mettre_a_jour")
 def api_enregistrer_nouveau_produit_postgres(payload: dict, x_api_key: str = Header(...)):
-    """Reçoit un nouveau produit ou une mise à jour de stock et l'enregistre sur PostgreSQL."""
+    """Reçoit un nouveau produit ou une mise à jour de stock depuis le gérant et l'enregistre sur PostgreSQL."""
     cle_boutique = x_api_key.strip()
     modele = payload.get("modele", "").strip().lower()
     quantite = int(payload.get("quantite_dispo", 0))
     prix_achat = float(payload.get("prix_achat", 0.0))
     
     if not modele:
-        raise HTTPException(status_code=400, detail="Le modèle est requis.")
+        raise HTTPException(status_code=400, detail="Le nom du modèle est requis.")
         
     try:
         conn = obtenir_connexion_postgresql()
         curseur = conn.cursor()
         
-        # Vérification si le produit existe déjà pour cette boutique sur le Cloud
+        # 1. Vérification si le produit existe déjà pour cette boutique sur le Cloud
         curseur.execute(
             "SELECT 1 FROM produits_cloud WHERE cle_boutique = %s AND article = %s", 
             (cle_boutique, modele)
@@ -460,14 +460,14 @@ def api_enregistrer_nouveau_produit_postgres(payload: dict, x_api_key: str = Hea
         existe = curseur.fetchone()
         
         if existe:
-            # Si le produit existe, on cumule la quantité et met à jour le prix
+            # Si le produit existe déjà, on cumule la quantité et met à jour le prix d'achat
             curseur.execute("""
                 UPDATE produits_cloud 
                 SET quantite = quantite + %s, prix_ht = %s 
                 WHERE cle_boutique = %s AND article = %s
             """, (quantite, prix_achat, cle_boutique, modele))
         else:
-            # Sinon, on insère une nouvelle ligne dans le catalogue Cloud
+            # Sinon, on insère une toute nouvelle ligne dans le catalogue Cloud de la boutique
             curseur.execute("""
                 INSERT INTO produits_cloud (cle_boutique, article, description_unique, prix_ht, quantite)
                 VALUES (%s, %s, 'Stock Initial Pro', %s, %s)
@@ -476,7 +476,7 @@ def api_enregistrer_nouveau_produit_postgres(payload: dict, x_api_key: str = Hea
         conn.commit()
         curseur.close()
         conn.close()
-        return {"statut": "Succès", "message": f"Produit {modele.upper()} synchronisé sur le Cloud !"}
+        return {"statut": "Succès", "message": f"Produit {modele.upper()} synchronisé avec succès sur le Cloud !"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erreur d'écriture produits Postgres : {str(e)}")
 

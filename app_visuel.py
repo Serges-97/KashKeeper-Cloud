@@ -303,26 +303,31 @@ def ouvrir_panneau_stock():
             p_achat = float(p_achat_txt)
             if qte <= 0 or p_achat < 0: raise ValueError
                 
-            # 🟢 ENVOI EN DIRECT SUR L'API RENDER POUR ENREGISTRER LE PRODUIT DANS LE POSTGRESQL GLOBAL
+            # 🟢 SYNCHRONISATION SYNCHRONE IMMÉDIATE SUR TON API RENDER
             if URL_API_KASHFLOW and CLE_API_KASHFLOW:
                 payload_produit = {
-                    "article": modele,
-                    "description_unique": "Stock Initial Pro",
-                    "prix_ht": p_achat,
-                    "quantite": qte
+                    "modele": modele,
+                    "quantite_dispo": qte,
+                    "prix_achat": p_achat
                 }
-                # Appel en tâche de fond pour ne pas bloquer l'écran
-                threading.Thread(target=lambda: requests.post(
-                    f"{URL_API_KASHFLOW}/stocks/mettre_a_jour", 
-                    json={"modele": modele, "quantite_dispo": qte, "prix_achat": p_achat}, 
-                    headers={"X-API-Key": CLE_API_KASHFLOW}, 
-                    timeout=10
-                ), daemon=True).start()
+                try:
+                    # On retire le thread d'arrière-plan pour bloquer et forcer l'envoi direct au PostgreSQL
+                    reponse = requests.post(
+                        f"{URL_API_KASHFLOW}/stocks/mettre_a_jour", 
+                        json=payload_produit, 
+                        headers={"X-API-Key": CLE_API_KASHFLOW}, 
+                        timeout=15
+                    )
+                    if reponse.status_code != 200:
+                        logging.error("Échec synchro Cloud des stocks, code : %s", reponse.status_code)
+                except Exception as error_net:
+                    logging.error("Erreur réseau lors de l'envoi du stock : %s", error_net)
 
+            # Écriture dans la base de données SQLite locale pour l'affichage immédiat
             connexion = sqlite3.connect(data_base.DB_NAME)
             curseur = connexion.cursor()
             curseur.execute("""
-            INSERT INTO stocks (modele, quantite_dispo, prix_achat) VALUES (?, ?, ?)
+            INSERT INTO stocks (modele, quantite_dispo, prix_achat, ventes_cumulees) VALUES (?, ?, ?, 0)
             ON CONFLICT(modele) DO UPDATE SET quantite_dispo = quantite_dispo + ?, prix_achat = ?
             """, (modele, qte, p_achat, qte, p_achat))
             connexion.commit()
