@@ -437,7 +437,7 @@ def api_envoyer_employes_aux_caissieres(x_api_key: str = Header(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/stocks/mettre_a_jour")
+@app.post("/stocks/mettre_a_jour", dependencies=[Depends(verifier_cle_api)])
 def api_enregistrer_nouveau_produit_postgres(payload: dict, x_api_key: str = Header(...)):
     """Reçoit un nouveau produit ou une mise à jour de stock depuis le gérant et l'enregistre sur PostgreSQL."""
     cle_boutique = x_api_key.strip()

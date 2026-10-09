@@ -303,27 +303,7 @@ def ouvrir_panneau_stock():
             p_achat = float(p_achat_txt)
             if qte <= 0 or p_achat < 0: raise ValueError
                 
-            # 🟢 SYNCHRONISATION SYNCHRONE IMMÉDIATE SUR TON API RENDER
-            if URL_API_KASHFLOW and CLE_API_KASHFLOW:
-                payload_produit = {
-                    "modele": modele,
-                    "quantite_dispo": qte,
-                    "prix_achat": p_achat
-                }
-                try:
-                    # On retire le thread d'arrière-plan pour bloquer et forcer l'envoi direct au PostgreSQL
-                    reponse = requests.post(
-                        f"{URL_API_KASHFLOW}/stocks/mettre_a_jour", 
-                        json=payload_produit, 
-                        headers={"X-API-Key": CLE_API_KASHFLOW}, 
-                        timeout=15
-                    )
-                    if reponse.status_code != 200:
-                        logging.error("Échec synchro Cloud des stocks, code : %s", reponse.status_code)
-                except Exception as error_net:
-                    logging.error("Erreur réseau lors de l'envoi du stock : %s", error_net)
-
-            # Écriture dans la base de données SQLite locale pour l'affichage immédiat
+            # 🟢 ÉTAPE 1 (PRIORITAIRE) : Écriture immédiate et sécurisée dans la base SQLite locale
             connexion = sqlite3.connect(data_base.DB_NAME)
             curseur = connexion.cursor()
             curseur.execute("""
@@ -333,12 +313,40 @@ def ouvrir_panneau_stock():
             connexion.commit()
             connexion.close()
             
-            messagebox.showinfo("Inventaire Mis à jour", f"L'article '{modele.upper()}' a été enregistré et synchronisé sur le Cloud !")
+            # 🟢 ÉTAPE 2 : Mise à jour instantanée de l'écran du gérant
+            messagebox.showinfo("Inventaire Mis à jour", f"L'article '{modele.upper()}' a été enregistré localement avec succès !")
             entree_modele.delete(0, tk.END); entree_qte_stock.delete(0, tk.END); entree_prix_achat_stock.delete(0, tk.END)
             rafraichir_tableau()
             entree_modele.focus()
+
+            # 🟢 ÉTAPE 3 : Propulsion asynchrone vers le Cloud Render (en arrière-plan)
+            if URL_API_KASHFLOW and CLE_API_KASHFLOW:
+                payload_produit = {
+                    "modele": modele,
+                    "quantite_dispo": qte,
+                    "prix_achat": p_achat
+                }
+                def envoi_cloud_invisible():
+                    try:
+                        reponse = requests.post(
+                            f"{URL_API_KASHFLOW}/stocks/mettre_a_jour", 
+                            json=payload_produit, 
+                            headers={"X-API-Key": CLE_API_KASHFLOW}, 
+                            timeout=15
+                        )
+                        if reponse.status_code == 200:
+                            print(f"📡 [CLOUD] Synchronisation réussie pour {modele.upper()}")
+                        else:
+                            print(f"⚠️ [CLOUD] Erreur serveur code : {reponse.status_code}")
+                    except Exception as e:
+                        print(f"📡 [CLOUD] Serveur injoignable, le produit reste en local : {e}")
+                
+                # On lance l'envoi dans un fil invisible pour que l'application reste ultra-rapide
+                threading.Thread(target=envoi_cloud_invisible, daemon=True).start()
+
         except ValueError:
             messagebox.showerror("Erreur", "Données numériques invalides.")
+
 
 # =====================================================================
 # MODULE 4 : app_visuel.py (Version Multi-Postes Pro - ÉTAPE 6 SUR 15)
