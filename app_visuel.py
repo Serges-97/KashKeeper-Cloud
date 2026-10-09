@@ -1553,7 +1553,10 @@ def ouvrir_historique_caissiere():
 
 # --- LOGIQUE SÉCURITÉ COMPTOIR : VERIFICATION DES ACCÈS ET CONTRÔLE DE LICENCE SAAS ---
 def verifier_acces():
-    """Valide la session employé en rafraîchissant d'abord le miroir local depuis le Cloud."""
+    """Valide la session employé. 
+    Si le compte n'existe pas localement, interroge en direct le Cloud Render PostgreSQL 
+    et l'enregistre immédiatement en local en cas de succès pour accélérer le futur.
+    """
     global SESSION_UTILISATEUR, NOM_CAISSIERE_ACTIVE
     user = entree_user.get().strip().lower()
     pwd = entree_password.get().strip()
@@ -1563,14 +1566,10 @@ def verifier_acces():
         return
 
     try:
-        # Allumage préventif des structures locales
+        # Allumage préventif des structures locales SQLite
         data_base.initialisation_systeme()
 
-        # 🟢 CORRECTION CRITIQUE N°1 : On rafraîchit d'abord la base locale SQLite avec les données Cloud
-        # Ainsi, si le gérant a créé "caissiere1" à distance, elle est immédiatement téléchargée ici !
-        rafraichir_donnees_locales_depuis_cloud()
-
-        # Lecture immédiate en base de données locale pour vérifier l'état d'avancement
+        # Lecture initiale pour savoir si la boutique est déjà installée
         connexion = sqlite3.connect(data_base.DB_NAME)
         curseur = connexion.cursor()
         curseur.execute("SELECT mot_de_passe FROM employes WHERE identifiant = 'gerant'")
@@ -1583,7 +1582,9 @@ def verifier_acces():
         mot_de_passe_actuel_db = ligne_pwd[0] if ligne_pwd else "serge2026"
         boutique_installee = ligne_boutique is not None
 
-        # 🟢 CAS 1 : Premier démarrage de l'histoire du logiciel sur le PC du client
+        # =====================================================================
+        # 🚨 CAS 1 : CONFIGURATION INITIALE ABSOLUE (PREMIER ALLUMAGE DE L'HISTOIRE)
+        # =====================================================================
         if not boutique_installee and mot_de_passe_actuel_db == "serge2026":
             if user == "gerant" and pwd == "serge2026":
                 nom_magasin = simpledialog.askstring("Configuration Boutique - Étape 1/2", "Bienvenue chez KashKeeper !\n\nVeuillez entrer le NOM OFFICIEL de votre entreprise :")
@@ -1599,12 +1600,6 @@ def verifier_acces():
                 data_base.enregistrer_nom_boutique_sql(nom_magasin.strip())
                 data_base.configurer_compte_gerant_sql(creer_code.strip())
                 
-                # On pousse directement les configurations d'allumage vers le Cloud Postgres
-                try:
-                    payload_init = {"identifiant": "caissiere1", "mot_de_passe": "1234", "role": "caissiere", "salaire": 50000}
-                    requests.post(f"{URL_API_KASHFLOW}/licence/enregistrer-employe-cloud", json=payload_init, headers={"X-API-Key": CLE_API_KASHFLOW}, timeout=10)
-                except Exception: pass
-
                 messagebox.showinfo("Succès", f"Félicitations !\nL'entreprise '{nom_magasin.strip().upper()}' est activée.\n\nConnectez-vous maintenant.")
                 entree_password.delete(0, tk.END)
                 entree_password.focus()
@@ -1613,16 +1608,51 @@ def verifier_acces():
                 messagebox.showerror("Accès Refusé", "Code d'initialisation d'usine incorrect.")
                 return
 
+        # Sécurité mot de passe d'origine expiré
         if pwd == "serge2026" and mot_de_passe_actuel_db != "serge2026":
             messagebox.showerror("Accès Refusé", "Ce mot de passe d'usine a expiré après la configuration initiale.")
             return
 
-        # 🟢 CAS 2 : Utilisation quotidienne (La caissière ou le gérant s'identifient sur la base fraîchement synchronisée)
+        # =====================================================================
+        # 🌐 CAS 2 : DEUXIÈME ALLUMAGE ET UTILISATION QUOTIDIENNE (TA LOGIQUE CLOUD EXCLUSIVEMENT)
+        # =====================================================================
+        
+        # Étape A : Si c'est une caissière (pas le gérant), on va d'abord tenter de rafraîchir en direct depuis Render
+        if user != "gerant" and URL_API_KASHFLOW and CLE_API_KASHFLOW:
+            try:
+                print("⏳ [CLOUD] Interrogation préventive de Render pour authentification caissière...")
+                headers = {"X-API-Key": CLE_API_KASHFLOW}
+                # On force le téléchargement des fiches employés créées sur la machine gérant
+                rep_emp = requests.get(f"{URL_API_KASHFLOW}/boutique/telecharger-employes", headers=headers, timeout=10)
+                if rep_emp.status_code == 200:
+                    employes = rep_emp.json().get("employes", [])
+                    
+                    # On ouvre le SQLite local pour inscrire directement le compte trouvé dans le Cloud
+                    conn_sync = sqlite3.connect(data_base.DB_NAME)
+                    for emp in employes:
+                        user_emp = emp[0] if isinstance(emp, list) else emp.get("identifiant")
+                        pass_emp = emp[1] if isinstance(emp, list) else emp.get("mot_de_passe")
+                        sal_emp = emp[3] if isinstance(emp, list) else emp.get("salaire")
+                        
+                        # 🟢 GRAVURE EN BASE LOCALE DIRECTE : On écrase ou on insère pour accélérer la prochaine connexion hors-ligne
+                        conn_sync.execute("""
+                            INSERT INTO employes (identifiant, mot_de_passe, applique_tva, salaire) 
+                            VALUES (?, ?, 1, ?)
+                            ON CONFLICT(identifiant) DO UPDATE SET mot_de_passe = ?, salaire = ?
+                        """, (user_emp, pass_emp, sal_emp, pass_emp, sal_emp))
+                    conn_sync.commit()
+                    conn_sync.close()
+                    print("✅ [CLOUD] Compte caissière synchronisé et gravé localement !")
+            except Exception as err_cloud:
+                print(f"📡 [CLOUD] Serveur injoignable au clic, authentification basée sur la mémoire locale : {err_cloud}")
+
+        # Étape B : Vérification finale des identifiants (qu'ils viennent d'être synchronisés à l'instant ou lus du disque local)
         if data_base.verifier_identifiants_sql(user, pwd):
             autorisation_ouvrir_comptoir = True
             
+            # Contrôle de sécurité de la licence SaaS
             try:
-                reponse_licence = requests.get(f"{URL_API_KASHFLOW}/licence/statut", headers={"X-API-Key": CLE_API_KASHFLOW}, timeout=15)
+                reponse_licence = requests.get(f"{URL_API_KASHFLOW}/licence/statut", headers={"X-API-Key": CLE_API_KASHFLOW}, timeout=10)
                 if reponse_licence.status_code == 200:
                     infos = reponse_licence.json()
                     statut_serveur = infos.get("statut", "actif")
@@ -1640,7 +1670,7 @@ def verifier_acces():
                                 autorisation_ouvrir_comptoir = True
                         
                         if not autorisation_ouvrir_comptoir:
-                            messagebox.showerror("Abonnement Expiré", "🚨 COMPTOIR SÉCURISÉ VERROUILLÉ !")
+                            messagebox.showerror("Abonnement Expiré", "🚨 COMPTOIR  VERROUILLÉ !")
                             return 
                     elif statut_serveur == "grace":
                         messagebox.showwarning("Avertissement Grâce", f"⚠️ MODE TOLÉRANCE ACTIF :\nIl vous reste {jours_restants} jour(s) avant blocage.")
@@ -1652,15 +1682,18 @@ def verifier_acces():
                 NOM_CAISSIERE_ACTIVE = str(user).strip().lower()
                 messagebox.showinfo("Accès Autorisé", f"Bienvenue {SESSION_UTILISATEUR.upper()} !")
                 FENETRE_PRINCIPALE_LOGIN.withdraw()
-                # 🟢 NOTE : rafraichir_donnees_locales_depuis_cloud() ayant déjà été exécuté au début, on lance directement les structures d'écoute
+                
+                # Téléchargement asynchrone du catalogue de stocks une fois connecté pour mettre à jour la grille
+                threading.Thread(target=rafraichir_donnees_locales_depuis_cloud, daemon=True).start()
+                
                 lancer_thread_synchronisation_asynchrone()
                 ouvrir_comptoir_facturation()
-
-
         else:
             messagebox.showerror("Accès Refusé", "Identifiant ou mot de passe incorrect.")
+            
     except Exception as e:
         messagebox.showerror("Erreur", f"Erreur système : {str(e)}")
+
 
 
 def recuperer_mot_de_passe_oublie():
