@@ -1662,7 +1662,7 @@ def verifier_acces():
                 print("⏳ [CLOUD] Interrogation préventive de Render pour authentification caissière...")
                 headers = {"X-API-Key": CLE_API_KASHFLOW}
                 # On force le téléchargement des fiches employés créées sur la machine gérant
-                rep_emp = requests.get(f"{URL_API_KASHFLOW}/boutique/telecharger-employes", headers=headers, timeout=10)
+                rep_emp = requests.get(f"{URL_API_KASHFLOW}/boutique/telecharger-employes", headers=headers, timeout=30)
                 if rep_emp.status_code == 200:
                     employes = rep_emp.json().get("employes", [])
                     
@@ -1691,7 +1691,7 @@ def verifier_acces():
             
             # Contrôle de sécurité de la licence SaaS
             try:
-                reponse_licence = requests.get(f"{URL_API_KASHFLOW}/licence/statut", headers={"X-API-Key": CLE_API_KASHFLOW}, timeout=10)
+                reponse_licence = requests.get(f"{URL_API_KASHFLOW}/licence/statut", headers={"X-API-Key": CLE_API_KASHFLOW}, timeout=30)
                 if reponse_licence.status_code == 200:
                     infos = reponse_licence.json()
                     statut_serveur = infos.get("statut", "actif")
