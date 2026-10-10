@@ -459,18 +459,22 @@ def api_envoyer_stocks_aux_caissieres(x_api_key: str = Header(...)):
 # 🟢 APPLIQUE LA PROTECTION DE LICENCE SUR LES EMPLOYÉS :
 @app.get("/boutique/telecharger-employes", dependencies=[Depends(verifier_cle_api)])
 def api_envoyer_employes_aux_caissieres(x_api_key: str = Header(...)):
-    """Renvoie la liste des employés dans le format attendu pour l'insertion SQLite."""
+    """Renvoie la liste des employés dans le format attendu pour l'insertion SQLite local."""
     try:
         conn = obtenir_connexion_postgresql()
         curseur = conn.cursor()
+        # 🟢 AJUSTEMENT UNIQUE SQL : On extrait explicitement la colonne 'salaire' pour remplir l'index 3
         curseur.execute("SELECT identifiant, mot_de_passe, role, salaire FROM employes_cloud WHERE cle_boutique = %s", (x_api_key.strip(),))
         employes = curseur.fetchall()
         curseur.close()
         conn.close()
+        
+        # Le formatage génère exactement 4 éléments par employé
         liste_formatee = [[e["identifiant"], e["mot_de_passe"], e["role"], e["salaire"]] for e in employes]
         return {"employes": liste_formatee}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.post("/stocks/mettre_a_jour", dependencies=[Depends(verifier_cle_api)])
 def api_enregistrer_nouveau_produit_postgres(payload: dict, x_api_key: str = Header(...)):
