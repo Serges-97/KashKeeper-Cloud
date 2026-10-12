@@ -671,28 +671,30 @@ def page_generateur_visuel_en_dur(cle_client: str = None, mois: int = None, anne
         </div>
         """
 
-    # 🟢 2. EXTRACTION EN DIRECT DE LA BASE DE DONNÉES CLOUD
+    # 🟢 2. EXTRACTION EN DIRECT DE LA BASE DE DONNÉES CLOUD POSTGRESQL (CORRIGÉ SERGE)
     lignes_clients_html = ""
     try:
-        conn = sqlite3.connect(DB_LICENCES_CLOUD)
+        # On interroge la vraie base PostgreSQL Render au lieu du fichier SQLite vide
+        conn = obtenir_connexion_postgresql()
         curseur = conn.cursor()
         curseur.execute("SELECT cle_boutique, date_expiration, statut_reglement FROM abonnements_magasin ORDER BY cle_boutique ASC")
         lignes_db = curseur.fetchall()
+        curseur.close()
         conn.close()
         
         if not lignes_db:
             lignes_clients_html = '<tr><td colspan="3" style="padding: 10px; color: #64748b; font-style: italic;">Aucune boutique enregistrée pour le moment.</td></tr>'
         else:
             for row in lignes_db:
-                cle_escape = row[0].replace("'", "\\'")
+                cle_escape = row["cle_boutique"].replace("'", "\\'")
                 lignes_clients_html += f"""
                 <tr style="border-bottom: 1px solid #334155;">
                     <td style="padding: 10px; font-weight: bold; color: #ffffff; text-align: left;">
-                        <span id="txt_{row[0]}">{row[0]}</span>
+                        <span id="txt_{row['cle_boutique']}">{row['cle_boutique']}</span>
                         <button type="button" onclick="copierEtColler('{cle_escape}')" style="margin-left: 8px; padding: 2px 6px; background-color: #3b82f6; color: white; border: none; border-radius: 4px; font-size: 0.7rem; cursor: pointer; font-weight: bold;">📋 Copier</button>
                     </td>
-                    <td style="padding: 10px; color: #cbd5e1;">{row[1]}</td>
-                    <td style="padding: 10px; color: #10b981; font-weight: bold;">{str(row[2]).upper()}</td>
+                    <td style="padding: 10px; color: #cbd5e1;">{row['date_expiration']}</td>
+                    <td style="padding: 10px; color: #10b981; font-weight: bold;">{str(row['statut_reglement']).upper()}</td>
                 </tr>
                 """
     except Exception as e:
