@@ -218,12 +218,17 @@ def api_centraliser_vente(donnees: VenteSchemaReseau):
     except Exception as e: raise HTTPException(status_code=500, detail=str(e))
 
 # 🟢 APPLIQUE CETTE LOGIQUE DANS API.PY (LIGNE 153+)
+# 🟢 REMPLACE UNIQUEMENT CETTE ROUTE DANS API.PY (LIGNE 153 À 188 ENVIRO)
 @app.post("/stocks/mettre_a_jour", dependencies=[Depends(verifier_cle_api)])
-def api_mettre_a_jour_stock_central(stock: StockSchemaReseau, x_api_key: str = Header(...)):
+def api_mettre_a_jour_stock_central(payload: dict, x_api_key: str = Header(...)):
     """Reçoit la mise à jour absolue des stocks (quantités et prix) depuis le gérant et synchronise sur PostgreSQL Cloud."""
     cle_boutique = x_api_key.strip()
-    modele_propre = stock.modele.strip().lower()
-    p_achat = stock.prix_achat if stock.prix_achat is not None else 0.0
+    modele_propre = payload.get("modele", "").strip().lower()
+    quantite_dispo = int(payload.get("quantite_dispo", 0))
+    prix_achat = float(payload.get("prix_achat", 0.0))
+    
+    if not modele_propre:
+        raise HTTPException(status_code=400, detail="Le modèle est requis.")
     
     try:
         conn = obtenir_connexion_postgresql()
@@ -234,25 +239,26 @@ def api_mettre_a_jour_stock_central(stock: StockSchemaReseau, x_api_key: str = H
         existe = curseur.fetchone()
         
         if existe:
-            # 🟢 D'APRES TA LOGIQUE : On écrase l'ancienne quantité par la nouvelle valeur absolue du gérant (même si c'est 0)
+            # On écrase l'ancienne quantité par la nouvelle valeur absolue du gérant
             curseur.execute("""
                 UPDATE produits_cloud 
                 SET quantite = %s, prix_ht = %s 
                 WHERE cle_boutique = %s AND article = %s
-            """, (stock.quantite_dispo, p_achat, cle_boutique, modele_propre))
+            """, (quantite_dispo, prix_achat, cle_boutique, modele_propre))
         else:
             # Si le produit n'existe pas, on le crée à neuf
             curseur.execute("""
                 INSERT INTO produits_cloud (cle_boutique, article, description_unique, prix_ht, quantite)
                 VALUES (%s, %s, 'Produit de Production', %s, %s)
-            """, (cle_boutique, modele_propre, p_achat, stock.quantite_dispo))
+            """, (cle_boutique, modele_propre, prix_achat, quantite_dispo))
             
         conn.commit()
         curseur.close()
         conn.close()
-        return {"statut": "Succès", "message": f"Stock de {modele_propre.upper()} synchronisé à {stock.quantite_dispo} pcs sur le Cloud !"}
+        return {"statut": "Succès", "message": f"Stock de {modele_propre.upper()} synchronisé à {quantite_dispo} pcs sur le Cloud !"}
     except Exception as e: 
         raise HTTPException(status_code=500, detail=f"Erreur d'écriture Postgres : {str(e)}")
+
 
 # 🟢 AJOUTE CETTE NOUVELLE ROUTE EXCLUSIVEMENT POUR LE BOUTON SUPPRIMER DU GERANT
 @app.post("/stocks/supprimer_definitif", dependencies=[Depends(verifier_cle_api)])

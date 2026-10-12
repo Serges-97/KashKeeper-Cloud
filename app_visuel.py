@@ -2086,7 +2086,7 @@ def lancer_moteur_hybride_synchro_cloud():
 # Allumage officiel du logiciel d'usine
 
 def rafraichir_donnees_locales_depuis_cloud():
-    """Télécharge les stocks et les employés depuis Render pour écraser le SQLite local."""
+    """Télécharge les stocks et les employés depuis Render pour écraser le SQLite local sans aucun freeze."""
     global URL_API_KASHFLOW, CLE_API_KASHFLOW
 
     if URL_API_KASHFLOW and CLE_API_KASHFLOW:
@@ -2104,6 +2104,7 @@ def rafraichir_donnees_locales_depuis_cloud():
                     prix_art = art[2] if isinstance(art, list) else art.get("prix_ht")
                     qte_art = art[3] if isinstance(art, list) else art.get("quantite")
                     
+                    # Alignement strict avec la structure d'origine (modele, quantite_dispo, prix_achat, ventes_cumulees)
                     conn.execute("INSERT INTO stocks (modele, quantite_dispo, prix_achat, ventes_cumulees) VALUES (?, ?, ?, 0)", 
                                  (nom_art, qte_art, prix_art))
                 conn.commit()
@@ -2120,10 +2121,9 @@ def rafraichir_donnees_locales_depuis_cloud():
                 for emp in employes:
                     user_emp = emp[0] if isinstance(emp, list) else emp.get("identifiant")
                     pass_emp = emp[1] if isinstance(emp, list) else emp.get("mot_de_passe")
-                    # Sécurité d'indexation : si l'index 3 est fourni, on le lit, sinon valeur à 0.0 par défaut
                     sal_emp = emp[3] if (isinstance(emp, list) and len(emp) > 3) else (emp.get("salaire", 0.0) if isinstance(emp, dict) else 0.0)
                     
-                    # Insertion chirurgicale alignée sur ta structure d'origine locale
+                    # Insertion chirurgicale alignée sur ta table locale employes (identifiant, mot_de_passe, applique_tva, salaire)
                     conn.execute("INSERT INTO employes (identifiant, mot_de_passe, applique_tva, salaire) VALUES (?, ?, 1, ?)", 
                                  (user_emp, pass_emp, sal_emp))
                 conn.commit()
@@ -2132,6 +2132,7 @@ def rafraichir_donnees_locales_depuis_cloud():
             print("🔄 Données de la boutique synchronisées avec succès depuis le Cloud !")
         except Exception as e:
             print(f"⚠️ Impossible de rafraîchir les données (Mode hors-ligne) : {e}")
+
 
 login.mainloop()
 
