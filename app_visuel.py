@@ -1084,12 +1084,16 @@ def ouvrir_comptoir_facturation():
         label_statut_cloud.config(text="🔄 Connexion en cours...", fg="#94a3b8")
         comptoir.update_idletasks()
         try:
-            reponse = requests.get(URL_API_KASHFLOW, timeout=4)
+            # 🟢 CORRECTION COMPTABLE : On passe la clé API dans les headers pour déclencher l'auto-inscription cloud
+            headers = {"X-API-Key": CLE_API_KASHFLOW} if CLE_API_KASHFLOW else {}
+            reponse = requests.get(URL_API_KASHFLOW, headers=headers, timeout=10)
+            
             if reponse.status_code == 200:
                 label_statut_cloud.config(text="📡 CLOUD CONNECTÉ : EN DIRECT 🟢", fg="#10b981")
                 threading.Thread(target=rafraichir_stocks_depuis_cloud, daemon=True).start()
-                messagebox.showinfo("Réseau OK", "Liaisons d'antennes d'usine synchronisées !")
-            else: label_statut_cloud.config(text="📡 SERVEUR EN LIGNE 🟡", fg="#f59e0b")
+                messagebox.showinfo("Réseau OK", "Liaisons d'antennes d'usine synchronisées ! Clé enregistrée sur le manager.")
+            else: 
+                label_statut_cloud.config(text="📡 SERVEUR EN LIGNE 🟡", fg="#f59e0b")
         except Exception:
             label_statut_cloud.config(text="📡 CLOUD DÉCONNECTÉ 🔴", fg="#dc2626")
             messagebox.showwarning("Réseau Coupé", "Fonctionnement local asynchrone activé.")

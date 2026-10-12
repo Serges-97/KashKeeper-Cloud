@@ -18,7 +18,13 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 
 # Connexion automatique à ta base PostgreSQL Render
+# 🟢 REMPLACE LA LIGNE 20 DE API.PY PAR CE BLOC BLINDÉ :
 DATABASE_URL_POSTGRES = os.environ.get("DATABASE_URL")
+
+# Si la variable de Render est vide (ce qui signifie que tu es sur ton PC local sous Windows)
+if not DATABASE_URL_POSTGRES:
+    # 📋 COLLE ICI TON VRAI LIEN EXTERNAL DATABASE URL COPIÉ DEPUIS RENDER :
+    DATABASE_URL_POSTGRES = "postgresql://serges_admin:TT7zdoWF9BYDHhPR3uPSRmpCi6CnFn88@dpg-db21lijncjis73bcau60-a.oregon-postgres.render.com/kashflow_db_gydg"
 
 def obtenir_connexion_postgresql():
     """Crée une connexion directe à ton instance PostgreSQL Render."""
