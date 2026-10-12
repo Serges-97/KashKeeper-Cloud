@@ -75,9 +75,9 @@ def initialiser_tables_postgresql_cloud():
         #if not curseur.fetchone():
         #    curseur.execute("INSERT INTO abonnements_magasin (cle_boutique, date_expiration, statut_reglement) VALUES (%s, %s, %s);", ("SERGE_TECH_998877", "31/12/2026", "actif"))
             
-        curseur.execute("SELECT 1 FROM abonnements_magasin WHERE cle_boutique = 'BOUTIQUE_1';")
-        if not curseur.fetchone():
-            curseur.execute("INSERT INTO abonnements_magasin (cle_boutique, date_expiration, statut_reglement) VALUES (%s, %s, %s);", ("BOUTIQUE_1", "15/11/2026", "actif"))
+        #curseur.execute("SELECT 1 FROM abonnements_magasin WHERE cle_boutique = 'BOUTIQUE_1';")
+        #if not curseur.fetchone():
+        #    curseur.execute("INSERT INTO abonnements_magasin (cle_boutique, date_expiration, statut_reglement) VALUES (%s, %s, %s);", ("BOUTIQUE_1", "15/11/2026", "actif"))
 
         conn.commit()
         curseur.close()
