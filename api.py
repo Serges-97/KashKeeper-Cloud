@@ -133,8 +133,28 @@ def verifier_cle_api(x_api_key: str | None = Header(default=None)):
     if not x_api_key or not secrets.compare_digest(x_api_key, cle_attendue):
         raise HTTPException(status_code=401, detail="Clé API boutique invalide.")
 
+# 🟢 REMPLACE UNIQUEMENT CETTE ROUTE DANS TON API.PY :
 @app.get("/")
-def route_allumage_usine():
+def route_allumage_usine(x_api_key: str | None = Header(default=None)):
+    """Route de test réseau. Inscrit automatiquement la clé boutique dans le tableau d'abonnement au premier signal."""
+    if x_api_key:
+        cle_propre = x_api_key.strip()
+        try:
+            # Vérification de l'existence dans la base de licences permanente du disque cloud
+            conn = sqlite3.connect(DB_LICENCES_CLOUD)
+            curseur = conn.cursor()
+            curseur.execute("SELECT date_expiration FROM abonnements_magasin WHERE cle_boutique = ?", (cle_propre,))
+            row = curseur.fetchone()
+            
+            if not row:
+                # Si la boutique frappe pour la première fois, on lui offre 30 jours gratuits
+                date_initiale = (datetime.now() + timedelta(days=30)).strftime("%d/%m/%Y")
+                curseur.execute("INSERT INTO abonnements_magasin (cle_boutique, date_expiration) VALUES (?, ?)", (cle_propre, date_initiale))
+                conn.commit()
+            conn.close()
+        except Exception as e:
+            print(f"⚠️ Impossible d'auto-inscrire la licence au signal : {e}")
+
     return {"statut": "Opérationnel", "moteur": "KashFlow Multi-Postes Engine v6.0"}
 
 class VenteSchemaReseau(BaseModel):
