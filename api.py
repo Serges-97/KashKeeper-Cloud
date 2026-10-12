@@ -133,27 +133,35 @@ def verifier_cle_api(x_api_key: str | None = Header(default=None)):
     if not x_api_key or not secrets.compare_digest(x_api_key, cle_attendue):
         raise HTTPException(status_code=401, detail="Clé API boutique invalide.")
 
-# 🟢 REMPLACE UNIQUEMENT CETTE ROUTE DANS TON API.PY :
+# 🟢 CORRECTIF D'USINE ALIGNÉ LIGNE 116 DE API.PY :
 @app.get("/")
 def route_allumage_usine(x_api_key: str | None = Header(default=None)):
-    """Route de test réseau. Inscrit automatiquement la clé boutique dans le tableau d'abonnement au premier signal."""
+    """Route de test réseau. Inscrit automatiquement la clé boutique dans le PostgreSQL de production."""
     if x_api_key:
         cle_propre = x_api_key.strip()
         try:
-            # Vérification de l'existence dans la base de licences permanente du disque cloud
-            conn = sqlite3.connect(DB_LICENCES_CLOUD)
+            # On se connecte à la vraie base de données PostgreSQL Render
+            conn = obtenir_connexion_postgresql()
             curseur = conn.cursor()
-            curseur.execute("SELECT date_expiration FROM abonnements_magasin WHERE cle_boutique = ?", (cle_propre,))
+            
+            # Vérification de l'existence de la boutique
+            curseur.execute("SELECT date_expiration FROM abonnements_magasin WHERE cle_boutique = %s", (cle_propre,))
             row = curseur.fetchone()
             
             if not row:
-                # Si la boutique frappe pour la première fois, on lui offre 30 jours gratuits
+                # Si elle n'existe pas, on l'injecte dans la table cloud globale avec ses 30 jours gratuits
                 date_initiale = (datetime.now() + timedelta(days=30)).strftime("%d/%m/%Y")
-                curseur.execute("INSERT INTO abonnements_magasin (cle_boutique, date_expiration) VALUES (?, ?)", (cle_propre, date_initiale))
+                curseur.execute(
+                    "INSERT INTO abonnements_magasin (cle_boutique, date_expiration, statut_reglement) VALUES (%s, %s, 'actif')", 
+                    (cle_propre, date_initiale)
+                )
                 conn.commit()
+                print(f"📡 [CLOUD] Auto-inscription réussie de la licence : {cle_propre}")
+                
+            curseur.close()
             conn.close()
         except Exception as e:
-            print(f"⚠️ Impossible d'auto-inscrire la licence au signal : {e}")
+            print(f"⚠️ [CLOUD] Échec auto-inscription PostgreSQL : {e}")
 
     return {"statut": "Opérationnel", "moteur": "KashFlow Multi-Postes Engine v6.0"}
 
