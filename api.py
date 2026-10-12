@@ -71,9 +71,9 @@ def initialiser_tables_postgresql_cloud():
         """)
         
         # 🟢 PROTECTION COMMERCIALE : Injection automatique de tes propres clés de licence par défaut (sans comptes factices)
-        curseur.execute("SELECT 1 FROM abonnements_magasin WHERE cle_boutique = 'SERGE_TECH_998877';")
-        if not curseur.fetchone():
-            curseur.execute("INSERT INTO abonnements_magasin (cle_boutique, date_expiration, statut_reglement) VALUES (%s, %s, %s);", ("SERGE_TECH_998877", "31/12/2026", "actif"))
+        #curseur.execute("SELECT 1 FROM abonnements_magasin WHERE cle_boutique = 'SERGE_TECH_998877';")
+        #if not curseur.fetchone():
+        #    curseur.execute("INSERT INTO abonnements_magasin (cle_boutique, date_expiration, statut_reglement) VALUES (%s, %s, %s);", ("SERGE_TECH_998877", "31/12/2026", "actif"))
             
         curseur.execute("SELECT 1 FROM abonnements_magasin WHERE cle_boutique = 'BOUTIQUE_1';")
         if not curseur.fetchone():
