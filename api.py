@@ -268,27 +268,25 @@ def api_centraliser_vente(donnees: VenteSchemaReseau, x_api_key: str = Header(..
         
         date_facture = datetime.now().strftime("%d/%m/%Y %H:%M")
         
-        # Connexion à la vraie base de données PostgreSQL Render du gérant
-        conn = obtenir_connexion_postgresql()
-        curseur = conn.cursor()
-        
-        # Insertion unifiée dans le grand registre comptable de production
-        curseur.execute("""
-            INSERT INTO ventes_cloud_gerant 
-            (cle_boutique, id_local, client, article, description_unique, montant_ht, tva, total_ttc, caissiere, date_vente)
-            VALUES (%s, nextval('ventes_cloud_gerant_id_seq'), %s, %s, %s, %s, %s, %s, %s, %s)
-            RETURNING id_local;
-        """, (cle_boutique, donnees.client.upper(), donnees.article.upper(), donnees.description_unique, total_ht, tva_calculee, total_ttc, donnees.caissiere, date_facture))
-        
-        facture_id_cloud = curseur.fetchone()[0]
-        conn.commit()
-        curseur.close()
-        conn.close()
+        # 🟢 CORRECTIF SSL & FERMETURE DE SÉCURITÉ : 
+        # Utilisation de 'with' pour forcer la fermeture immédiate du slot de connexion PostgreSQL
+        with obtenir_connexion_postgresql() as conn:
+            with conn.cursor() as curseur:
+                curseur.execute("""
+                    INSERT INTO ventes_cloud_gerant 
+                    (cle_boutique, id_local, client, article, description_unique, montant_ht, tva, total_ttc, caissiere, date_vente)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING id_local;
+                """, (cle_boutique, donnees.reference_locale, donnees.client.upper(), donnees.article.upper(), donnees.description_unique, total_ht, tva_calculee, total_ttc, donnees.caissiere, date_facture))
+                
+                facture_id_cloud = curseur.fetchone()
+                conn.commit()
         
         print(f"📡 [CLOUD] Vente de {donnees.caissiere.upper()} centralisée sur Postgres avec succès !")
         return {"statut": "Synchronisé", "facture_id_cloud": facture_id_cloud}
     except Exception as e: 
         raise HTTPException(status_code=500, detail=f"Erreur d'injection financière Cloud : {str(e)}")
+
 
 
 # 🟢 APPLIQUE CETTE LOGIQUE DANS API.PY (LIGNE 153+)
