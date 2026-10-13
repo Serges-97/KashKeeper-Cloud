@@ -214,9 +214,9 @@ def api_synchroniser_ventes_postgres(payload: dict, x_api_key: str = Header(...)
     cle_boutique = x_api_key.strip()
     ventes = payload.get("ventes", [])
     ids_reussis = []
-    
+   
     try:
-        # 🟢 FERMETURE AUTOMATIQUE DES ROBINETS DE CONNEXION (Empêche l'erreur FATAL de slots)
+        # FERMETURE AUTOMATIQUE DES ROBINETS DE CONNEXION (Empêche la saturation des slots)
         with obtenir_connexion_postgresql() as conn:
             with conn.cursor() as curseur:
                 
@@ -238,7 +238,7 @@ def api_synchroniser_ventes_postgres(payload: dict, x_api_key: str = Header(...)
                 """)
                 
                 for v in ventes:
-                    # Insertion unifiée dans le grand registre comptable du Gérant
+                    # 🟢 ALIGNEMENT STRICT : 'date_vente' remplace l'ancien mot erroné 'date_facture'
                     curseur.execute("""
                         INSERT INTO ventes_cloud_gerant 
                         (cle_boutique, id_local, client, article, description_unique, montant_ht, tva, total_ttc, caissiere, date_vente)
@@ -263,8 +263,6 @@ def api_synchroniser_ventes_postgres(payload: dict, x_api_key: str = Header(...)
         return {"statut": "Succès", "ids_synchonises": ids_reussis}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erreur d'écriture Postgres : {str(e)}")
-
-
 
 
 @app.post("/ventes/synchroniser", dependencies=[Depends(verifier_cle_api)])
