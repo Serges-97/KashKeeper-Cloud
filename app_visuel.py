@@ -311,7 +311,7 @@ def ouvrir_panneau_stock():
             p_achat = float(p_achat_txt)
             if qte <= 0 or p_achat < 0: raise ValueError
                 
-            # 🟢 ÉTAPE 1 : Écriture immédiate dans la base SQLite locale (Priorité terrain)
+            # Étape 1 : Écriture immédiate dans la base SQLite locale (Priorité terrain)
             connexion = sqlite3.connect(data_base.DB_NAME)
             curseur = connexion.cursor()
             curseur.execute("""
@@ -321,13 +321,13 @@ def ouvrir_panneau_stock():
             connexion.commit()
             connexion.close()
             
-            # Étape 2 : Rafraîchissement visuel instantané du tableau à l'écran
+            # Étape 2 : Rafraîchissement visuel instantané du tableau des stocks du gérant
             rafraichir_tableau()
             messagebox.showinfo("Inventaire Mis à jour", f"L'article '{modele.upper()}' a été enregistré localement avec succès !")
             entree_modele.delete(0, tk.END); entree_qte_stock.delete(0, tk.END); entree_prix_achat_stock.delete(0, tk.END)
             entree_modele.focus()
 
-            # 🟢 ÉTAPE 3 : Propulsion Cloud synchrone au format de l'objet Pydantic StockSchemaReseau
+            # Étape 3 : Propulsion Cloud synchrone vers l'API PostgreSQL Render
             if URL_API_KASHFLOW and CLE_API_KASHFLOW:
                 payload_produit = {
                     "modele": modele,
@@ -336,6 +336,7 @@ def ouvrir_panneau_stock():
                 }
                 def envoi_cloud_securise():
                     try:
+                        # 🟢 SÉCURISATION DU HEADER ET DES CLÉS SAAS POUR ÉVITER LE 401
                         reponse = requests.post(
                             f"{URL_API_KASHFLOW}/stocks/mettre_a_jour", 
                             json=payload_produit, 
@@ -344,12 +345,13 @@ def ouvrir_panneau_stock():
                         )
                         if reponse.status_code == 200:
                             print(f"📡 [CLOUD] Synchronisation d'inventaire réussie pour {modele.upper()}")
+                            # 🟢 LA MAGIE EST ICI : On force l'application à rafraîchir le comptoir caissière à la seconde même !
+                            rafraichir_donnees_locales_depuis_cloud()
                         else:
                             print(f"⚠️ [CLOUD] Échec d'authentification ou de routage, code : {reponse.status_code}")
                     except Exception as e:
                         print(f"📡 [CLOUD] Mode asynchrone - Écrit en local uniquement : {e}")
                 
-                # Exécution asynchrone pour ne pas faire geler l'interface graphique de la caisse
                 threading.Thread(target=envoi_cloud_securise, daemon=True).start()
 
         except ValueError:
@@ -1049,6 +1051,7 @@ def ouvrir_comptoir_facturation():
 
 
     def actualiser_liste_deroulante_smartphones():
+        global actualiser_liste_deroulante_smartphones
         try:
             connexion = sqlite3.connect(data_base.DB_NAME)
             curseur = connexion.cursor()
@@ -2097,6 +2100,7 @@ def rafraichir_donnees_locales_depuis_cloud():
         try:
             headers = {"X-API-Key": CLE_API_KASHFLOW}
             
+            
             # 1. Téléchargement et synchronisation des stocks
             rep_stocks = requests.get(f"{URL_API_KASHFLOW}/boutique/telecharger-stocks", headers=headers, timeout=45)
             if rep_stocks.status_code == 200:
@@ -2108,11 +2112,20 @@ def rafraichir_donnees_locales_depuis_cloud():
                     prix_art = art[2] if isinstance(art, list) else art.get("prix_ht")
                     qte_art = art[3] if isinstance(art, list) else art.get("quantite")
                     
-                    # Alignement strict avec la structure d'origine (modele, quantite_dispo, prix_achat, ventes_cumulees)
                     conn.execute("INSERT INTO stocks (modele, quantite_dispo, prix_achat, ventes_cumulees) VALUES (?, ?, ?, 0)", 
                                  (nom_art, qte_art, prix_art))
                 conn.commit()
                 conn.close()
+                
+                # 🟢 RECHARGE VISUELLE GLOBALISÉE : On force la fenêtre maîtresse à actualiser ses graphiques
+                try:
+                    FENETRE_PRINCIPALE_LOGIN.update_idletasks()
+                    actualiser_liste_deroulante_smartphones()
+                except Exception:
+                    pass
+                    
+                print("📡 [MIROIR CLOUD] Inventaire cloné avec succès.")
+
 
             # 2. Téléchargement et synchronisation des employés
             rep_emp = requests.get(f"{URL_API_KASHFLOW}/boutique/telecharger-employes", headers=headers, timeout=45)
