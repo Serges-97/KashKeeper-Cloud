@@ -210,46 +210,60 @@ class StockSchemaReseau(BaseModel):
 
 @app.post("/sync/ventes_magasin", dependencies=[Depends(verifier_cle_api)])
 def api_synchroniser_ventes_postgres(payload: dict, x_api_key: str = Header(...)):
-    """Reçoit les ventes locales de la caissière et les enregistre dans le PostgreSQL Cloud."""
+    """Reçoit le paquet de ventes locales de la caissière et les grave proprement dans PostgreSQL."""
     cle_boutique = x_api_key.strip()
     ventes = payload.get("ventes", [])
     ids_reussis = []
     
     try:
-        conn = obtenir_connexion_postgresql()
-        curseur = conn.cursor()
-        
-        # Création de la table centralisée sur Postgres si elle n'existe pas
-        curseur.execute("""
-            CREATE TABLE IF NOT EXISTS ventes_cloud_gerant (
-                id SERIAL PRIMARY KEY,
-                cle_boutique TEXT,
-                id_local INTEGER,
-                client TEXT,
-                article TEXT,
-                description_unique TEXT,
-                montant_ht REAL,
-                tva REAL,
-                total_ttc REAL,
-                caissiere TEXT,
-                date_vente TEXT
-            )
-        """)
-        
-        for v in ventes:
-            curseur.execute("""
-                INSERT INTO ventes_cloud_gerant 
-                (cle_boutique, id_local, client, article, description_unique, montant_ht, tva, total_ttc, caissiere, date_vente)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """, (cle_boutique, v["id_local"], v["client"], v["article"], v["description_unique"], v["montant_ht"], v["tva"], v["total_ttc"], v["caissiere"], v["date_vente"]))
-            ids_reussis.append(v["id_local"])
-            
-        conn.commit()
-        curseur.close()
-        conn.close()
+        # 🟢 FERMETURE AUTOMATIQUE DES ROBINETS DE CONNEXION (Empêche l'erreur FATAL de slots)
+        with obtenir_connexion_postgresql() as conn:
+            with conn.cursor() as curseur:
+                
+                # Création sécurisée de la table centrale de production si absente
+                curseur.execute("""
+                    CREATE TABLE IF NOT EXISTS ventes_cloud_gerant (
+                        id SERIAL PRIMARY KEY,
+                        cle_boutique TEXT NOT NULL,
+                        id_local INTEGER,
+                        client TEXT,
+                        article TEXT,
+                        description_unique TEXT,
+                        montant_ht REAL,
+                        tva REAL,
+                        total_ttc REAL,
+                        caissiere TEXT,
+                        date_vente TEXT
+                    );
+                """)
+                
+                for v in ventes:
+                    # Insertion unifiée dans le grand registre comptable du Gérant
+                    curseur.execute("""
+                        INSERT INTO ventes_cloud_gerant 
+                        (cle_boutique, id_local, client, article, description_unique, montant_ht, tva, total_ttc, caissiere, date_vente)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """, (
+                        cle_boutique, 
+                        v["id_local"], 
+                        str(v["client"]).upper(), 
+                        str(v["article"]).upper(), 
+                        str(v["description_unique"]).upper(), 
+                        float(v["montant_ht"]), 
+                        float(v["tva"]), 
+                        float(v["total_ttc"]), 
+                        str(v["caissiere"]).lower().strip(), 
+                        str(v["date_vente"]).strip()
+                    ))
+                    ids_reussis.append(v["id_local"])
+                    
+                conn.commit()
+                
+        print(f"📡 [CLOUD] Synchro réussie pour la caisse {cle_boutique} ! Paquet de {len(ids_reussis)} ventes gravé.")
         return {"statut": "Succès", "ids_synchonises": ids_reussis}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erreur d'écriture Postgres : {str(e)}")
+
 
 
 
