@@ -1,2 +1,2 @@
 URL_API - https://kashkeeper-cloud.onrender.com 
-CLE_API - SERGE_TECH_998877
+CLE_API - BOUTIQUE_1
