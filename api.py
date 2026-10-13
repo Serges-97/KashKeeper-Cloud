@@ -134,10 +134,31 @@ def initialiser_base_licences_permanente():
 initialiser_base_licences_permanente()
 
 def verifier_cle_api(x_api_key: str | None = Header(default=None)):
-    cle_attendue = str(os.environ.get("KASHFLOW_API_KEY", "")).strip()
-    if not cle_attendue: return  
-    if not x_api_key or not secrets.compare_digest(x_api_key, cle_attendue):
-        raise HTTPException(status_code=401, detail="Clé API boutique invalide.")
+    """Filtre de sécurité global. Inscrit automatiquement la clé dans le PostgreSQL de production."""
+    if not x_api_key or len(x_api_key.strip()) < 3:
+        raise HTTPException(status_code=401, detail="Clé API boutique manquante ou invalide.")
+        
+    cle_propre = x_api_key.strip()
+    try:
+        conn = obtenir_connexion_postgresql()
+        curseur = conn.cursor()
+        curseur.execute("SELECT date_expiration FROM abonnements_magasin WHERE cle_boutique = %s", (cle_propre,))
+        row = curseur.fetchone()
+        
+        if not row:
+            # 🟢 AUTO-INSCRIPTION COMMERCIALE AUTOMATIQUE : Dès qu'une route est touchée, la clé s'inscrit sur le site !
+            date_initiale = (datetime.now() + timedelta(days=30)).strftime("%d/%m/%Y")
+            curseur.execute(
+                "INSERT INTO abonnements_magasin (cle_boutique, date_expiration, statut_reglement) VALUES (%s, %s, 'actif')", 
+                (cle_propre, date_initiale)
+            )
+            conn.commit()
+            print(f"📡 [CLOUD] Nouvelle boutique détectée et inscrite automatiquement : {cle_propre}")
+            
+        curseur.close()
+        conn.close()
+    except Exception as e:
+        print(f"⚠️ [CLOUD] Échec auto-inscription sécurité : {e}")
 
 # 🟢 CORRECTIF D'USINE ALIGNÉ LIGNE 116 DE API.PY :
 @app.get("/")

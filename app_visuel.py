@@ -1077,11 +1077,22 @@ def ouvrir_comptoir_facturation():
 # MODULE 4 : app_visuel.py (Version Multi-Postes Pro - ÉTAPE 12 SUR 15)
 # =====================================================================
     def verifier_connexion_cloud():
+        """S'assure que le serveur répond ET que la clé de licence du fichier texte est valide."""
+        if not URL_API_KASHFLOW or not CLE_API_KASHFLOW:
+            label_statut_cloud.config(text="📡 CLÉ MANQUANTE 🔴", fg="#dc2626")
+            return
         try:
-            reponse = requests.get(URL_API_KASHFLOW, timeout=4)
-            if reponse.status_code == 200: label_statut_cloud.config(text="CONNECTÉ 🟢", fg="#10b981")
-            else: label_statut_cloud.config(text="📡 SERVEUR EN LIGNE 🟡", fg="#f59e0b")
-        except Exception: label_statut_cloud.config(text=" DÉCONNECTÉ 🔴", fg="#dc2626")
+            # 🟢 SÉCURISÉ : On interroge la route de licence avec le Header de sécurité
+            headers = {"X-API-Key": CLE_API_KASHFLOW}
+            reponse = requests.get(f"{URL_API_KASHFLOW}/licence/statut", headers=headers, timeout=5)
+            
+            if reponse.status_code == 200:
+                label_statut_cloud.config(text="CONNECTÉ 🟢", fg="#10b981")
+            else:
+                label_statut_cloud.config(text="📡 CLÉ API INVALIDÉE ❌", fg="#dc2626")
+        except Exception:
+            label_statut_cloud.config(text=" DÉCONNECTÉ 🔴", fg="#dc2626")
+
 
     def forcer_test_reseau():
         label_statut_cloud.config(text="🔄 Connexion en cours...", fg="#94a3b8")
@@ -1660,61 +1671,90 @@ def verifier_acces():
         # =====================================================================
         # 🌐 CAS 2 : DEUXIÈME ALLUMAGE ET UTILISATION QUOTIDIENNE ULTRA-RAPIDE
         # =====================================================================
-        
-        # Étape A : Si le compte existe localement, on connecte DIRECTEMENT à la milliseconde
         if data_base.verifier_identifiants_sql(user, pwd):
-            SESSION_UTILISATEUR = str(user).strip().lower()
-            NOM_CAISSIERE_ACTIVE = str(user).strip().lower()
+            autorisation_ouvrir_comptoir = True
             
-            messagebox.showinfo("Accès Autorisé", f"Bienvenue {SESSION_UTILISATEUR.upper()} !")
-            FENETRE_PRINCIPALE_LOGIN.withdraw()
-            
-            # 🟢 LA SÉCURITÉ INDUSTRIELLE : Le rafraîchissement s'exécute dans un fil invisible en arrière-plan
-            # L'application de ton amie s'ouvre instantanément sans attendre que Render ne se réveille !
-            threading.Thread(target=rafraichir_donnees_locales_depuis_cloud, daemon=True).start()
-            
-            lancer_thread_synchronisation_asynchrone()
-            ouvrir_comptoir_facturation()
-            return
+            # 🟢 VÉRIFICATION STRICTE DE LA LICENCE AVANT D'OUVRIR LE COMPTOIR
+            if URL_API_KASHFLOW and CLE_API_KASHFLOW:
+                try:
+                    headers = {"X-API-Key": CLE_API_KASHFLOW}
+                    reponse_licence = requests.get(f"{URL_API_KASHFLOW}/licence/statut", headers=headers, timeout=12)
+                    if reponse_licence.status_code == 200:
+                        infos = reponse_licence.json()
+                        statut_serveur = infos.get("statut", "actif")
+                        jours_restants = infos.get("jours_restants", 0)
 
-        # Étape B : SECOURS INTERNET - Si le compte n'est pas encore sur le disque dur (ex: nouvelle caissière), 
-        # on fait une vérification réseau rapide pour interroger le Cloud Render et la cloner
-        if user != "gerant" and URL_API_KASHFLOW and CLE_API_KASHFLOW:
-            try:
-                headers = {"X-API-Key": CLE_API_KASHFLOW}
-                rep_emp = requests.get(f"{URL_API_KASHFLOW}/boutique/telecharger-employes", headers=headers, timeout=12)
-                if rep_emp.status_code == 200:
-                    employes = rep_emp.json().get("employes", [])
-                    conn_sync = sqlite3.connect(data_base.DB_NAME)
-                    for emp in employes:
-                        user_emp = emp[0] if isinstance(emp, list) else emp.get("identifiant")
-                        pass_emp = emp[1] if isinstance(emp, list) else emp.get("mot_de_passe")
-                        sal_emp = emp[3] if (isinstance(emp, list) and len(emp) > 3) else (emp.get("salaire", 0.0) if isinstance(emp, dict) else 0.0)
+                        if statut_serveur == "expire":
+                            # Vérification de secours si une clé physique WhatsApp a été entrée localement
+                            conn = sqlite3.connect(data_base.DB_NAME)
+                            row_secours = conn.execute("SELECT valeur FROM configuration WHERE cle = 'licence_secours_expire'").fetchone()
+                            conn.close()
+                            
+                            autorisation_ouvrir_comptoir = False
+                            if row_secours:
+                                date_exp_secours = datetime.strptime(row_secours[0], "%d/%m/%Y")
+                                if (date_exp_secours - datetime.now()).days >= 0:
+                                    autorisation_ouvrir_comptoir = True
+                            
+                            if not autorisation_ouvrir_comptoir:
+                                messagebox.showerror("Abonnement Expiré", "🚨 COMPTOIR SÉCURISÉ VERROUILLÉ !\n\nVotre abonnement de 14 000 FCFA est échu. Veuillez renouveler.")
+                                return 
+                        elif statut_serveur == "grace":
+                            messagebox.showwarning("Mode Tolérance", f"⚠️ MODE TOLÉRANCE ACTIF :\nIl vous reste {jours_restants} jour(s) avant blocage.")
+                except Exception as err_lic:
+                    print(f"📡 [LICENCE] Mode hors-ligne temporaire toléré : {err_lic}")
+
+            if autorisation_ouvrir_comptoir:
+                SESSION_UTILISATEUR = str(user).strip().lower()
+                NOM_CAISSIERE_ACTIVE = str(user).strip().lower()
+                
+                messagebox.showinfo("Accès Autorisé", f"Bienvenue {SESSION_UTILISATEUR.upper()} !")
+                FENETRE_PRINCIPALE_LOGIN.withdraw()
+                
+                threading.Thread(target=rafraichir_donnees_locales_depuis_cloud, daemon=True).start()
+                lancer_thread_synchronisation_asynchrone()
+                ouvrir_comptoir_facturation()
+                return
+        else:
+            # Étape B : SECOURS INTERNET - Si le compte n'est pas encore sur le disque dur (ex: nouvelle caissière), 
+            # on fait une vérification réseau rapide pour interroger le Cloud Render et la cloner
+            if user != "gerant" and URL_API_KASHFLOW and CLE_API_KASHFLOW:
+                try:
+                    headers = {"X-API-Key": CLE_API_KASHFLOW}
+                    rep_emp = requests.get(f"{URL_API_KASHFLOW}/boutique/telecharger-employes", headers=headers, timeout=12)
+                    if rep_emp.status_code == 200:
+                        employes = rep_emp.json().get("employes", [])
+                        conn_sync = sqlite3.connect(data_base.DB_NAME)
+                        for emp in employes:
+                            user_emp = emp[0] if isinstance(emp, list) else emp.get("identifiant")
+                            pass_emp = emp[1] if isinstance(emp, list) else emp.get("mot_de_passe")
+                            sal_emp = emp[3] if (isinstance(emp, list) and len(emp) > 3) else (emp.get("salaire", 0.0) if isinstance(emp, dict) else 0.0)
+                            
+                            conn_sync.execute("""
+                                INSERT INTO employes (identifiant, mot_de_passe, applique_tva, salaire) 
+                                VALUES (?, ?, 1, ?)
+                                ON CONFLICT(identifiant) DO UPDATE SET mot_de_passe = ?, salaire = ?
+                            """, (user_emp, pass_emp, sal_emp, pass_emp, sal_emp))
+                        conn_sync.commit()
+                        conn_sync.close()
                         
-                        conn_sync.execute("""
-                            INSERT INTO employes (identifiant, mot_de_passe, applique_tva, salaire) 
-                            VALUES (?, ?, 1, ?)
-                            ON CONFLICT(identifiant) DO UPDATE SET mot_de_passe = ?, salaire = ?
-                        """, (user_emp, pass_emp, sal_emp, pass_emp, sal_emp))
-                    conn_sync.commit()
-                    conn_sync.close()
-                    
-                    # Deuxième essai de validation après injection miroir
-                    if data_base.verifier_identifiants_sql(user, pwd):
-                        SESSION_UTILISATEUR = str(user).strip().lower()
-                        NOM_CAISSIERE_ACTIVE = str(user).strip().lower()
-                        FENETRE_PRINCIPALE_LOGIN.withdraw()
-                        threading.Thread(target=rafraichir_donnees_locales_depuis_cloud, daemon=True).start()
-                        lancer_thread_synchronisation_asynchrone()
-                        ouvrir_comptoir_facturation()
-                        return
-            except Exception:
-                pass
+                        # Deuxième essai de validation après injection miroir
+                        if data_base.verifier_identifiants_sql(user, pwd):
+                            SESSION_UTILISATEUR = str(user).strip().lower()
+                            NOM_CAISSIERE_ACTIVE = str(user).strip().lower()
+                            FENETRE_PRINCIPALE_LOGIN.withdraw()
+                            threading.Thread(target=rafraichir_donnees_locales_depuis_cloud, daemon=True).start()
+                            lancer_thread_synchronisation_asynchrone()
+                            ouvrir_comptoir_facturation()
+                            return
+                except Exception:
+                    pass
 
-        messagebox.showerror("Accès Refusé", "Identifiant ou mot de passe incorrect.")
+            messagebox.showerror("Accès Refusé", "Identifiant ou mot de passe incorrect.")
             
     except Exception as e:
         messagebox.showerror("Erreur", f"Erreur système : {str(e)}")
+
 
 
 
