@@ -253,24 +253,43 @@ def api_synchroniser_ventes_postgres(payload: dict, x_api_key: str = Header(...)
 
 
 @app.post("/ventes/synchroniser", dependencies=[Depends(verifier_cle_api)])
-def api_centraliser_vente(donnees: VenteSchemaReseau):
+def api_centraliser_vente(donnees: VenteSchemaReseau, x_api_key: str = Header(...)):
+    """Reçoit une vente unitaire depuis le comptoir caissière et la grave dans PostgreSQL Cloud."""
+    cle_boutique = x_api_key.strip()
     try:
         donnees.caissiere = donnees.caissiere.strip().lower()
         if donnees.prix_ht <= 0 or not 0 < donnees.quantite <= 1000:
             raise HTTPException(status_code=422, detail="Prix ou quantité invalide.")
-        connexion = sqlite3.connect(data_base.DB_NAME)
-        deja_sync = connexion.execute("SELECT id FROM ventes WHERE reference_locale = ?", (donnees.reference_locale,)).fetchone()
-        connexion.close()
-        if deja_sync: return {"statut": "Déjà synchronisé", "facture_id_cloud": deja_sync[0]}
-        
-        regime_tva = int(donnees.applique_tva_vente) if donnees.applique_tva_vente is not None else data_base.obtenir_regime_tva_employe(donnees.caissiere)
+            
         total_ht = donnees.prix_ht * donnees.quantite
+        regime_tva = int(donnees.applique_tva_vente) if donnees.applique_tva_vente is not None else 1
         tva_calculee = total_ht * (19.25 / 100) if regime_tva == 1 else 0.0
         total_ttc = total_ht + tva_calculee
         
-        num_facture = data_base.enregistrer_vente_sql(donnees.client, donnees.article, donnees.description_unique, total_ht, tva_calculee, total_ttc, donnees.caissiere, donnees.reference_locale, donnees.quantite)
-        return {"statut": "Synchronisé", "facture_id_cloud": num_facture}
-    except Exception as e: raise HTTPException(status_code=500, detail=str(e))
+        date_facture = datetime.now().strftime("%d/%m/%Y %H:%M")
+        
+        # Connexion à la vraie base de données PostgreSQL Render du gérant
+        conn = obtenir_connexion_postgresql()
+        curseur = conn.cursor()
+        
+        # Insertion unifiée dans le grand registre comptable de production
+        curseur.execute("""
+            INSERT INTO ventes_cloud_gerant 
+            (cle_boutique, id_local, client, article, description_unique, montant_ht, tva, total_ttc, caissiere, date_vente)
+            VALUES (%s, nextval('ventes_cloud_gerant_id_seq'), %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id_local;
+        """, (cle_boutique, donnees.client.upper(), donnees.article.upper(), donnees.description_unique, total_ht, tva_calculee, total_ttc, donnees.caissiere, date_facture))
+        
+        facture_id_cloud = curseur.fetchone()[0]
+        conn.commit()
+        curseur.close()
+        conn.close()
+        
+        print(f"📡 [CLOUD] Vente de {donnees.caissiere.upper()} centralisée sur Postgres avec succès !")
+        return {"statut": "Synchronisé", "facture_id_cloud": facture_id_cloud}
+    except Exception as e: 
+        raise HTTPException(status_code=500, detail=f"Erreur d'injection financière Cloud : {str(e)}")
+
 
 # 🟢 APPLIQUE CETTE LOGIQUE DANS API.PY (LIGNE 153+)
 # 🟢 REMPLACE UNIQUEMENT CETTE ROUTE DANS API.PY (LIGNE 153 À 188 ENVIRO)
