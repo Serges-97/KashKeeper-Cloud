@@ -27,8 +27,9 @@ if not DATABASE_URL_POSTGRES:
     DATABASE_URL_POSTGRES = "postgresql://serges_admin:TT7zdoWF9BYDHhPR3uPSRmpCi6CnFn88@dpg-db21lijncjis73bcau60-a.oregon-postgres.render.com/kashflow_db_gydg"
 
 def obtenir_connexion_postgresql():
-    """Crée une connexion directe à ton instance PostgreSQL Render."""
-    return psycopg2.connect(DATABASE_URL_POSTGRES, cursor_factory=RealDictCursor)
+    """Crée une connexion directe à ton instance PostgreSQL Render en forçant le mode sécurisé SSL."""
+    # 🟢 AJOUT STRICT DU PARAMÈTRE SSL INCONTOURNABLE EXIGÉ PAR RENDER
+    return psycopg2.connect(DATABASE_URL_POSTGRES, cursor_factory=RealDictCursor, sslmode="require")
 
 def initialiser_tables_postgresql_cloud():
     """Prépare toutes les tables requises sur PostgreSQL Render sans aucune donnée factice de test."""
@@ -268,8 +269,7 @@ def api_centraliser_vente(donnees: VenteSchemaReseau, x_api_key: str = Header(..
         
         date_facture = datetime.now().strftime("%d/%m/%Y %H:%M")
         
-        # 🟢 CORRECTIF SSL & FERMETURE DE SÉCURITÉ : 
-        # Utilisation de 'with' pour forcer la fermeture immédiate du slot de connexion PostgreSQL
+        # 🟢 EXCLUSIF : Utilisation de 'with' pour forcer la fermeture automatique et immédiate du slot de connexion PostgreSQL
         with obtenir_connexion_postgresql() as conn:
             with conn.cursor() as curseur:
                 curseur.execute("""
@@ -288,8 +288,6 @@ def api_centraliser_vente(donnees: VenteSchemaReseau, x_api_key: str = Header(..
         raise HTTPException(status_code=500, detail=f"Erreur d'injection financière Cloud : {str(e)}")
 
 
-
-# 🟢 APPLIQUE CETTE LOGIQUE DANS API.PY (LIGNE 153+)
 # 🟢 REMPLACE UNIQUEMENT CETTE ROUTE DANS API.PY (LIGNE 153 À 188 ENVIRO)
 @app.post("/stocks/mettre_a_jour", dependencies=[Depends(verifier_cle_api)])
 def api_mettre_a_jour_stock_central(payload: dict, x_api_key: str = Header(...)):
