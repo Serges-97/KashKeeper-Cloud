@@ -615,33 +615,53 @@ def ouvrir_panneau_historique():
         tk.Button(pop_detail, text="❌ FERMER", bg="#dc2626", fg="white", font=("Helvetica", 9, "bold"), command=pop_detail.destroy).pack(fill=tk.X, pady=5)
 
     def action_filtrer_par_vendeuse():
-        """Filtre l'historique global du gérant en combinant la caissière sélectionnée et les critères temporels stricts."""
+        """Filtre l'historique global en allant chercher l'activité en direct sur le Cloud Render PostgreSQL."""
         nom_vendeuse = normaliser_nom_caissiere(select_vendeuse.get())
         if not nom_vendeuse or nom_vendeuse == "anonyme": return
             
         for i in grille_audit.get_children(): 
             grille_audit.delete(i)
             
-        ventes_filtrees = data_base.recuperer_ventes_par_caissiere(nom_vendeuse)
-        
-        # Récupération des critères temporels du gérant
         valeur_temporelle = entree_cible.get().strip()
         periode_choisie = select_tempo.get() # "JOUR", "MOIS" ou "ANNEE"
-        
         total_ca_cible = 0.0
+        ventes_affichage = []
 
-        for index, v in enumerate(ventes_filtrees, start=1):
+        # 🟢 LECTURE CLOUD : On interroge Render pour voir l'activité de la caissière à distance
+        if URL_API_KASHFLOW and CLE_API_KASHFLOW:
+            try:
+                reponse = requests.get(
+                    f"{URL_API_KASHFLOW}/ventes/historique-cloud/{nom_vendeuse}",
+                    headers={"X-API-Key": CLE_API_KASHFLOW},
+                    timeout=12
+                )
+                if reponse.status_code == 200:
+                    donnees_cloud = reponse.json().get("ventes", [])
+                    # Reformatage unifié pour correspondre à la structure de ta grille locale
+                    for v in donnees_cloud:
+                        ventes_affichage.append([
+                            v["id_local"], v["client"], v["article"], v["total_ttc"],
+                            v["date_vente"], v["caissiere"], v["montant_ht"], v["tva"], v["date_vente"]
+                        ])
+            except Exception as e:
+                print(f"⚠️ Serveur injoignable pour le filtrage, repli local : {e}")
+
+        # Sécurité de secours : si Internet est coupé, on lit la mémoire locale de ta machine
+        if not ventes_affichage:
+            ventes_filtrees = data_base.recuperer_ventes_par_caissiere(nom_vendeuse)
+            for v in ventes_filtrees:
+                if isinstance(v, (tuple, list)): ventes_affichage.append(v)
+
+        # Application de ta logique d'origine de tri temporel strict
+        for index, v in enumerate(ventes_affichage, start=1):
             if isinstance(v, (tuple, list)) and len(v) >= 4:
                 num_id = v[0]
                 client_nom = str(v[1]).upper()
                 articles_bruts = str(v[2]).upper()
-                net_ttc_total = f"{float(v[6]):,} FCFA" if len(v) > 6 else f"{float(v[3]):,} FCFA"
+                net_ttc_total = f"{float(v[3]):,} FCFA" if isinstance(v[3], (int, float)) else str(v[3])
+                date_facture = str(v[4]).strip().split(" ")[0] # On isole la date DD/MM/YYYY du bloc date/heure
+                caissiere_emetteur = str(v[5]).upper()
                 
-                # Extraction de la vraie date DD/MM/YYYY
-                date_facture = str(v[8]).strip() if len(v) > 8 else (str(v[4]).strip() if len(v) > 4 else "29/09/2026")
-                caissiere_emetteur = str(v[7]).upper() if len(v) > 7 else (str(v[5]).upper() if len(v) > 5 else nom_vendeuse.upper())
-                
-                # 🟢 APPLICATION DU FILTRAGE TEMPOREL ULTRA-STRICT DEMANDÉ
                 if valeur_temporelle:
                     garder_ligne = False
                     if periode_choisie == "JOUR" and date_facture == valeur_temporelle:
@@ -651,25 +671,17 @@ def ouvrir_panneau_historique():
                     elif periode_choisie == "ANNEE" and date_facture.endswith(valeur_temporelle):
                         garder_ligne = True
                         
-                    if not garder_ligne:
-                        continue
+                    if not garder_ligne: continue
 
                 articles_visuels = articles_bruts if len(articles_bruts) < 32 else articles_bruts[:30] + "..."
                 grille_audit.insert("", tk.END, values=(num_id, client_nom, articles_visuels, net_ttc_total, date_facture, caissiere_emetteur))
                 
                 try:
-                    prix_brut = float(v[6]) if len(v) > 6 else float(v[3])
-                    total_ca_cible += prix_brut
-                except Exception:
-                    pass
+                    total_ca_cible += float(v[3])
+                except Exception: pass
             else:
-                num_id = str(index)
-                client_nom = "CLIENT UNIQUE"
-                articles_bruts = str(v).upper()
-                articles_visuels = articles_bruts if len(articles_bruts) < 32 else articles_bruts[:30] + "..."
-                grille_audit.insert("", tk.END, values=(num_id, client_nom, articles_visuels, "Voir reçu", "29/09/2026", nom_vendeuse.upper()))
+                grille_audit.insert("", tk.END, values=(str(index), "CLIENT UNIQUE", str(v).upper()[:30], "Voir reçu", "13/10/2026", nom_vendeuse.upper()))
 
-        # Mise à jour du CA dynamique correspondant strictement à la cible filtrée de la caissière
         label_ca.config(text=f"📊 CA FILTRÉ ({nom_vendeuse.upper()}) : {total_ca_cible:,} FCFA", bg="#0284c7", fg="white")
 
     def action_afficher_tout_historique():
@@ -2088,8 +2100,11 @@ btn_abonnement = tk.Button(
 btn_abonnement.pack(side=tk.RIGHT)
 
 def lancer_moteur_hybride_synchro_cloud():
-    """ thread invisible qui propulse les ventes vers Render PostgreSQL quand Internet est actif. """
+    """Thread invisible de production. Propulse les paquets de ventes locales vers 
+    Render PostgreSQL dès qu'un filet d'Internet est actif en y incluant la clé API d'accès.
+    """
     def boucle_traitement():
+        import time as time_system
         while True:
             try:
                 # 1. Extraction des lignes locales non encore synchronisées (synchro = 0)
@@ -2108,15 +2123,15 @@ def lancer_moteur_hybride_synchro_cloud():
                             "montant_ht": v[4], "tva": v[5], "total_ttc": v[6], "caissiere": v[7], "date_vente": v[8]
                         })
                     
-                    # 2. Expédition vers ton API d'infrastructure
+                    # 2. 🟢 EXPÉDITION AVEC HEADER SÉCURISÉ : On fournit le badge pour franchir le filtre verifier_cle_api
                     reponse = requests.post(
                         f"{URL_API_KASHFLOW}/sync/ventes_magasin",
                         json={"ventes": paquet_ventes},
-                        headers={"X-API-Key": CLE_API_KASHFLOW},
+                        headers={"X-API-Key": CLE_API_KASHFLOW, "Content-Type": "application/json"},
                         timeout=15
                     )
                     
-                    # 3. Si Render PostgreSQL valide, on marque synchro = 1 en local pour ne plus les renvoyer
+                    # 3. Si Render PostgreSQL valide (200 OK), on marque synchro = 1 en local
                     if reponse.status_code == 200:
                         ids_a_marquer = reponse.json().get("ids_synchonises", [])
                         conn_up = sqlite3.connect(data_base.DB_NAME)
@@ -2124,12 +2139,14 @@ def lancer_moteur_hybride_synchro_cloud():
                             conn_up.execute("UPDATE ventes SET synchro = 1 WHERE id = ?", (id_l,))
                         conn_up.commit()
                         conn_up.close()
-            except Exception:
-                pass # Internet est coupé au marché, le logiciel attend le prochain tour sans bloquer
+                        print(f"📡 [MOTEUR HYBRIDE] Propulsion réussie de {len(ids_a_marquer)} transactions au Cloud !")
+            except Exception as e:
+                print(f"⚠️ [MOTEUR HYBRIDE] Attente réseau ou serveur occupé : {e}")
                 
-            time.sleep(30) # Tourne en boucle toutes les 30 secondes
+            time_system.sleep(30) # Tourne en boucle toutes les 30 secondes en tâche de fond
 
     threading.Thread(target=boucle_traitement, daemon=True).start()
+
 # Allumage officiel du logiciel d'usine
 
 def rafraichir_donnees_locales_depuis_cloud():
