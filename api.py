@@ -126,31 +126,30 @@ def initialiser_base_licences_permanente():
 initialiser_base_licences_permanente()
 
 def verifier_cle_api(x_api_key: str | None = Header(default=None)):
-    """Filtre de sécurité global. Inscrit automatiquement la clé dans le PostgreSQL de production."""
+    """Filtre de sécurité global. Valide la clé et ferme immédiatement le slot PostgreSQL."""
     if not x_api_key or len(x_api_key.strip()) < 3:
         raise HTTPException(status_code=401, detail="Clé API boutique manquante ou invalide.")
         
     cle_propre = x_api_key.strip()
     try:
-        conn = obtenir_connexion_postgresql()
-        curseur = conn.cursor()
-        curseur.execute("SELECT date_expiration FROM abonnements_magasin WHERE cle_boutique = %s", (cle_propre,))
-        row = curseur.fetchone()
-        
-        if not row:
-            # 🟢 AUTO-INSCRIPTION COMMERCIALE AUTOMATIQUE : Dès qu'une route est touchée, la clé s'inscrit sur le site !
-            date_initiale = (datetime.now() + timedelta(days=30)).strftime("%d/%m/%Y")
-            curseur.execute(
-                "INSERT INTO abonnements_magasin (cle_boutique, date_expiration, statut_reglement) VALUES (%s, %s, 'actif')", 
-                (cle_propre, date_initiale)
-            )
-            conn.commit()
-            print(f"📡 [CLOUD] Nouvelle boutique détectée et inscrite automatiquement : {cle_propre}")
-            
-        curseur.close()
-        conn.close()
+        # 🟢 CORRECTIF CRITIQUE : Utilisation de 'with' pour forcer la destruction immédiate du slot
+        with obtenir_connexion_postgresql() as conn:
+            with conn.cursor() as curseur:
+                curseur.execute("SELECT date_expiration FROM abonnements_magasin WHERE cle_boutique = %s", (cle_propre,))
+                row = curseur.fetchone()
+                
+                if not row:
+                    # Auto-inscription automatique si la boutique est nouvelle
+                    date_initiale = (datetime.now() + timedelta(days=30)).strftime("%d/%m/%Y")
+                    curseur.execute(
+                        "INSERT INTO abonnements_magasin (cle_boutique, date_expiration, statut_reglement) VALUES (%s, %s, 'actif')", 
+                        (cle_propre, date_initiale)
+                    )
+                    conn.commit()
+                    print(f"📡 [CLOUD] Nouvelle boutique inscrite avec succès : {cle_propre}")
+                    
     except Exception as e:
-        print(f"⚠️ [CLOUD] Échec auto-inscription sécurité : {e}")
+        print(f"⚠️ [CLOUD] Échec auto-inscription sécurité (Slot libéré) : {e}")
 
 # 🟢 CORRECTIF D'USINE ALIGNÉ LIGNE 116 DE API.PY :
 @app.get("/")
