@@ -267,7 +267,7 @@ def api_synchroniser_ventes_postgres(payload: dict, x_api_key: str = Header(...)
 
 @app.post("/ventes/synchroniser", dependencies=[Depends(verifier_cle_api)])
 def api_centraliser_vente(donnees: VenteSchemaReseau, x_api_key: str = Header(...)):
-    """Reçoit une vente unitaire depuis le comptoir caissière et la grave dans PostgreSQL Cloud en libérant la mémoire."""
+    """Reçoit une vente unitaire depuis le comptoir caissière et la grave dans PostgreSQL Cloud."""
     cle_boutique = x_api_key.strip()
     try:
         donnees.caissiere = donnees.caissiere.strip().lower()
@@ -281,20 +281,31 @@ def api_centraliser_vente(donnees: VenteSchemaReseau, x_api_key: str = Header(..
         
         date_facture = datetime.now().strftime("%d/%m/%Y %H:%M")
         
-        # 🟢 GESTION CONTEXTUELLE NETTE : 'with' force la fermeture et destruction du slot dès la fin de l'écriture
+        # 🟢 CORRECTIF D'ALIGNEMENT : 10 colonnes pour 10 valeurs exactes insérées
         with obtenir_connexion_postgresql() as conn:
             with conn.cursor() as curseur:
                 curseur.execute("""
                     INSERT INTO ventes_cloud_gerant 
                     (cle_boutique, id_local, client, article, description_unique, montant_ht, tva, total_ttc, caissiere, date_vente)
-                    VALUES (%s, nextval('ventes_cloud_gerant_id_seq'), %s, %s, %s, %s, %s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     RETURNING id_local;
-                """, (cle_boutique, donnees.client.upper(), donnees.article.upper(), donnees.description_unique, total_ht, tva_calculee, total_ttc, donnees.caissiere, date_facture))
+                """, (
+                    cle_boutique, 
+                    int(donnees.reference_locale) if str(donnees.reference_locale).isdigit() else 9999, 
+                    donnees.client.upper(), 
+                    donnees.article.upper(), 
+                    donnees.description_unique, 
+                    total_ht, 
+                    tva_calculee, 
+                    total_ttc, 
+                    donnees.caissiere, 
+                    date_facture
+                ))
                 
                 facture_id_cloud = curseur.fetchone()
                 conn.commit()
         
-        print(f"📡 [CLOUD] Vente unitaire centralisée avec fermeture de slot PostgreSQL réussie !")
+        print(f"📡 [CLOUD] Vente de {donnees.caissiere.upper()} centralisée sur Postgres avec succès !")
         return {"statut": "Synchronisé", "facture_id_cloud": facture_id_cloud}
     except Exception as e: 
         raise HTTPException(status_code=500, detail=f"Erreur d'injection financière Cloud : {str(e)}")
