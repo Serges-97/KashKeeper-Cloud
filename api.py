@@ -272,7 +272,6 @@ def api_centraliser_vente(donnees: VenteSchemaReseau, x_api_key: str = Header(..
     try:
         donnees.caissiere = donnees.caissiere.strip().lower()
         
-        # 🟢 CORRECTIF DE SÉCURITÉ : On force la conversion en entier pour éviter l'erreur de type SQLite REAL
         quantite_entiere = int(float(donnees.quantite))
         if donnees.prix_ht <= 0 or not 0 < quantite_entiere <= 1000:
             raise HTTPException(status_code=422, detail="Prix ou quantité invalide.")
@@ -284,9 +283,13 @@ def api_centraliser_vente(donnees: VenteSchemaReseau, x_api_key: str = Header(..
         
         date_facture = datetime.now().strftime("%d/%m/%Y %H:%M")
         
-        # Connexion contextuelle sécurisée à ta base PostgreSQL Render
         with obtenir_connexion_postgresql() as conn:
             with conn.cursor() as curseur:
+                # 🟢 SÉCURITÉ INDUSTRIELLE : On force la colonne id_local à accepter le format TEXT pour absorber les UUID sans crasher
+                curseur.execute("""
+                    ALTER TABLE ventes_cloud_gerant ALTER COLUMN id_local TYPE TEXT;
+                """)
+                
                 curseur.execute("""
                     INSERT INTO ventes_cloud_gerant 
                     (cle_boutique, id_local, client, article, description_unique, montant_ht, tva, total_ttc, caissiere, date_vente)
@@ -294,7 +297,7 @@ def api_centraliser_vente(donnees: VenteSchemaReseau, x_api_key: str = Header(..
                     RETURNING id_local;
                 """, (
                     cle_boutique, 
-                    int(donnees.reference_locale) if str(donnees.reference_locale).isdigit() else 9999, 
+                    str(donnees.reference_locale).strip(), # 🟢 Sauvegardé proprement en format texte UUID
                     donnees.client.upper(), 
                     donnees.article.upper(), 
                     donnees.description_unique, 
