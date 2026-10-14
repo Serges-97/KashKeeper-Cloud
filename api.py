@@ -267,21 +267,24 @@ def api_synchroniser_ventes_postgres(payload: dict, x_api_key: str = Header(...)
 
 @app.post("/ventes/synchroniser", dependencies=[Depends(verifier_cle_api)])
 def api_centraliser_vente(donnees: VenteSchemaReseau, x_api_key: str = Header(...)):
-    """Reçoit une vente unitaire depuis le comptoir caissière et la grave dans PostgreSQL Cloud."""
+    """Reçoit une vente unitaire depuis le comptoir caissière et la grave proprement dans PostgreSQL Cloud."""
     cle_boutique = x_api_key.strip()
     try:
         donnees.caissiere = donnees.caissiere.strip().lower()
-        if donnees.prix_ht <= 0 or not 0 < donnees.quantite <= 1000:
+        
+        # 🟢 CORRECTIF DE SÉCURITÉ : On force la conversion en entier pour éviter l'erreur de type SQLite REAL
+        quantite_entiere = int(float(donnees.quantite))
+        if donnees.prix_ht <= 0 or not 0 < quantite_entiere <= 1000:
             raise HTTPException(status_code=422, detail="Prix ou quantité invalide.")
             
-        total_ht = donnees.prix_ht * donnees.quantite
+        total_ht = donnees.prix_ht * quantite_entiere
         regime_tva = int(donnees.applique_tva_vente) if donnees.applique_tva_vente is not None else 1
         tva_calculee = total_ht * (19.25 / 100) if regime_tva == 1 else 0.0
         total_ttc = total_ht + tva_calculee
         
         date_facture = datetime.now().strftime("%d/%m/%Y %H:%M")
         
-        # 🟢 CORRECTIF D'ALIGNEMENT : 10 colonnes pour 10 valeurs exactes insérées
+        # Connexion contextuelle sécurisée à ta base PostgreSQL Render
         with obtenir_connexion_postgresql() as conn:
             with conn.cursor() as curseur:
                 curseur.execute("""
@@ -305,7 +308,7 @@ def api_centraliser_vente(donnees: VenteSchemaReseau, x_api_key: str = Header(..
                 facture_id_cloud = curseur.fetchone()
                 conn.commit()
         
-        print(f"📡 [CLOUD] Vente de {donnees.caissiere.upper()} centralisée sur Postgres avec succès !")
+        print(f"📡 [CLOUD] Vente unitaire de {donnees.caissiere.upper()} centralisée avec succès !")
         return {"statut": "Synchronisé", "facture_id_cloud": facture_id_cloud}
     except Exception as e: 
         raise HTTPException(status_code=500, detail=f"Erreur d'injection financière Cloud : {str(e)}")
