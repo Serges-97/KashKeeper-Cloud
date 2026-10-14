@@ -2145,7 +2145,7 @@ def lancer_moteur_hybride_synchro_cloud():
                 
             time_system.sleep(30) # Tourne en boucle toutes les 30 secondes en tâche de fond
 
-    threading.Thread(target=boucle_traitement, daemon=True).start()
+    threading.Thread(target=boucle_treatment, daemon=True).start()
 
 # Allumage officiel du logiciel d'usine
 

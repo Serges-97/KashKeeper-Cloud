@@ -32,51 +32,60 @@ def obtenir_connexion_postgresql():
     return psycopg2.connect(DATABASE_URL_POSTGRES, cursor_factory=RealDictCursor, sslmode="require")
 
 def initialiser_tables_postgresql_cloud():
-    """Prépare toutes les tables requises sur PostgreSQL Render en fermant immédiatement le slot de connexion."""
+    """Prépare toutes les tables requises sur PostgreSQL Render sans aucune donnée factice de test."""
     try:
-        # 🟢 CORRIGÉ : L'utilisation de 'with' force Render à libérer le slot de connexion dès que l'allumage est fini
-        with obtenir_connexion_postgresql() as conn:
-            with conn.cursor() as curseur:
-                
-                # 1. Table des licences / abonnements
-                curseur.execute("""
-                    CREATE TABLE IF NOT EXISTS abonnements_magasin (
-                        id SERIAL PRIMARY KEY,
-                        cle_boutique VARCHAR(255) UNIQUE NOT NULL,
-                        date_expiration VARCHAR(50) NOT NULL,
-                        statut_reglement VARCHAR(50) DEFAULT 'actif'
-                    );
-                """)
-                
-                # 2. Table du catalogue des produits cloud
-                curseur.execute("""
-                    CREATE TABLE IF NOT EXISTS produits_cloud (
-                        id SERIAL PRIMARY KEY,
-                        cle_boutique VARCHAR(255) NOT NULL,
-                        article VARCHAR(255) NOT NULL,
-                        description_unique TEXT,
-                        prix_ht REAL NOT NULL,
-                        quantite INTEGER NOT NULL
-                    );
-                """)
+        conn = obtenir_connexion_postgresql()
+        curseur = conn.cursor()
+        
+        # 1. Table des licences / abonnements
+        curseur.execute("""
+            CREATE TABLE IF NOT EXISTS abonnements_magasin (
+                id SERIAL PRIMARY KEY,
+                cle_boutique VARCHAR(255) UNIQUE NOT NULL,
+                date_expiration VARCHAR(50) NOT NULL,
+                statut_reglement VARCHAR(50) DEFAULT 'actif'
+            );
+        """)
+        
+        # 2. Table du catalogue des produits cloud
+        curseur.execute("""
+            CREATE TABLE IF NOT EXISTS produits_cloud (
+                id SERIAL PRIMARY KEY,
+                cle_boutique VARCHAR(255) NOT NULL,
+                article VARCHAR(255) NOT NULL,
+                description_unique TEXT,
+                prix_ht REAL NOT NULL,
+                quantite INTEGER NOT NULL
+            );
+        """)
 
-                # 3. Table des fiches employés créées à distance
-                curseur.execute("""
-                    CREATE TABLE IF NOT EXISTS employes_cloud (
-                        id SERIAL PRIMARY KEY,
-                        cle_boutique VARCHAR(255) NOT NULL,
-                        identifiant VARCHAR(255) NOT NULL,
-                        mot_de_passe VARCHAR(255) NOT NULL,
-                        role VARCHAR(50) DEFAULT 'caissiere',
-                        salaire REAL DEFAULT 0.0
-                    );
-                """)
-                
-                conn.commit()
-        print("✅ [CLOUD POSTGRESQL] Infrastructures prêtes et slots de connexion libérés !")
+        # 3. Table des fiches employés créées à distance
+        curseur.execute("""
+            CREATE TABLE IF NOT EXISTS employes_cloud (
+                id SERIAL PRIMARY KEY,
+                cle_boutique VARCHAR(255) NOT NULL,
+                identifiant VARCHAR(255) NOT NULL,
+                mot_de_passe VARCHAR(255) NOT NULL,
+                role VARCHAR(50) DEFAULT 'caissiere',
+                salaire REAL DEFAULT 0.0
+            );
+        """)
+        
+        # 🟢 PROTECTION COMMERCIALE : Injection automatique de tes propres clés de licence par défaut (sans comptes factices)
+        #curseur.execute("SELECT 1 FROM abonnements_magasin WHERE cle_boutique = 'SERGE_TECH_998877';")
+        #if not curseur.fetchone():
+        #    curseur.execute("INSERT INTO abonnements_magasin (cle_boutique, date_expiration, statut_reglement) VALUES (%s, %s, %s);", ("SERGE_TECH_998877", "31/12/2026", "actif"))
+            
+        #curseur.execute("SELECT 1 FROM abonnements_magasin WHERE cle_boutique = 'BOUTIQUE_1';")
+        #if not curseur.fetchone():
+        #    curseur.execute("INSERT INTO abonnements_magasin (cle_boutique, date_expiration, statut_reglement) VALUES (%s, %s, %s);", ("BOUTIQUE_1", "15/11/2026", "actif"))
+
+        conn.commit()
+        curseur.close()
+        conn.close()
+        print("✅ [CLOUD POSTGRESQL] Infrastructures prêtes à blanc pour la production commerciale !")
     except Exception as e:
         print(f"❌ [ERREUR INITIALISATION TABLES] : {e}")
-
 
 # Lancement au démarrage de ton serveur Render
 initialiser_tables_postgresql_cloud()
@@ -126,30 +135,31 @@ def initialiser_base_licences_permanente():
 initialiser_base_licences_permanente()
 
 def verifier_cle_api(x_api_key: str | None = Header(default=None)):
-    """Filtre de sécurité global. Valide la clé et ferme immédiatement le slot PostgreSQL."""
+    """Filtre de sécurité global. Inscrit automatiquement la clé dans le PostgreSQL de production."""
     if not x_api_key or len(x_api_key.strip()) < 3:
         raise HTTPException(status_code=401, detail="Clé API boutique manquante ou invalide.")
         
     cle_propre = x_api_key.strip()
     try:
-        # 🟢 CORRECTIF CRITIQUE : Utilisation de 'with' pour forcer la destruction immédiate du slot
-        with obtenir_connexion_postgresql() as conn:
-            with conn.cursor() as curseur:
-                curseur.execute("SELECT date_expiration FROM abonnements_magasin WHERE cle_boutique = %s", (cle_propre,))
-                row = curseur.fetchone()
-                
-                if not row:
-                    # Auto-inscription automatique si la boutique est nouvelle
-                    date_initiale = (datetime.now() + timedelta(days=30)).strftime("%d/%m/%Y")
-                    curseur.execute(
-                        "INSERT INTO abonnements_magasin (cle_boutique, date_expiration, statut_reglement) VALUES (%s, %s, 'actif')", 
-                        (cle_propre, date_initiale)
-                    )
-                    conn.commit()
-                    print(f"📡 [CLOUD] Nouvelle boutique inscrite avec succès : {cle_propre}")
-                    
+        conn = obtenir_connexion_postgresql()
+        curseur = conn.cursor()
+        curseur.execute("SELECT date_expiration FROM abonnements_magasin WHERE cle_boutique = %s", (cle_propre,))
+        row = curseur.fetchone()
+        
+        if not row:
+            # 🟢 AUTO-INSCRIPTION COMMERCIALE AUTOMATIQUE : Dès qu'une route est touchée, la clé s'inscrit sur le site !
+            date_initiale = (datetime.now() + timedelta(days=30)).strftime("%d/%m/%Y")
+            curseur.execute(
+                "INSERT INTO abonnements_magasin (cle_boutique, date_expiration, statut_reglement) VALUES (%s, %s, 'actif')", 
+                (cle_propre, date_initiale)
+            )
+            conn.commit()
+            print(f"📡 [CLOUD] Nouvelle boutique détectée et inscrite automatiquement : {cle_propre}")
+            
+        curseur.close()
+        conn.close()
     except Exception as e:
-        print(f"⚠️ [CLOUD] Échec auto-inscription sécurité (Slot libéré) : {e}")
+        print(f"⚠️ [CLOUD] Échec auto-inscription sécurité : {e}")
 
 # 🟢 CORRECTIF D'USINE ALIGNÉ LIGNE 116 DE API.PY :
 @app.get("/")
@@ -200,107 +210,79 @@ class StockSchemaReseau(BaseModel):
 
 @app.post("/sync/ventes_magasin", dependencies=[Depends(verifier_cle_api)])
 def api_synchroniser_ventes_postgres(payload: dict, x_api_key: str = Header(...)):
-    """Reçoit le paquet de ventes locales de la caissière et les grave proprement dans PostgreSQL Cloud."""
+    """Reçoit les ventes locales de la caissière et les enregistre dans le PostgreSQL Cloud."""
     cle_boutique = x_api_key.strip()
     ventes = payload.get("ventes", [])
     ids_reussis = []
     
     try:
-        # 🟢 SÉCURITÉ ABSOLUE : Fermeture forcée des robinets après traitement du paquet de ventes
-        with obtenir_connexion_postgresql() as conn:
-            with conn.cursor() as curseur:
-                
-                # Création sécurisée de la table centrale de production si absente
-                curseur.execute("""
-                    CREATE TABLE IF NOT EXISTS ventes_cloud_gerant (
-                        id SERIAL PRIMARY KEY,
-                        cle_boutique TEXT NOT NULL,
-                        id_local TEXT,
-                        client TEXT,
-                        article TEXT,
-                        description_unique TEXT,
-                        montant_ht REAL,
-                        tva REAL,
-                        total_ttc REAL,
-                        caissiere TEXT,
-                        date_vente TEXT
-                    );
-                """)
-                
-                for v in ventes:
-                    curseur.execute("""
-                        INSERT INTO ventes_cloud_gerant 
-                        (cle_boutique, id_local, client, article, description_unique, montant_ht, tva, total_ttc, caissiere, date_vente)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    """, (
-                        cle_boutique, 
-                        str(v["id_local"]).strip(), # UUID ou ID unique de transaction
-                        str(v["client"]).upper(), 
-                        str(v["article"]).upper(), 
-                        str(v["description_unique"]).upper(), 
-                        float(v["montant_ht"]), 
-                        float(v["tva"]), 
-                        float(v["total_ttc"]), 
-                        str(v["caissiere"]).lower().strip(), 
-                        str(v["date_vente"]).strip()
-                    ))
-                    ids_reussis.append(v["id_local"])
-                    
-                conn.commit()
-                
-        print(f"📡 [CLOUD] Synchro réussie ! Paquet de {len(ids_reussis)} ventes de la caissière gravé sur le Cloud.")
+        conn = obtenir_connexion_postgresql()
+        curseur = conn.cursor()
+        
+        # Création de la table centralisée sur Postgres si elle n'existe pas
+        curseur.execute("""
+            CREATE TABLE IF NOT EXISTS ventes_cloud_gerant (
+                id SERIAL PRIMARY KEY,
+                cle_boutique TEXT,
+                id_local INTEGER,
+                client TEXT,
+                article TEXT,
+                description_unique TEXT,
+                montant_ht REAL,
+                tva REAL,
+                total_ttc REAL,
+                caissiere TEXT,
+                date_vente TEXT
+            )
+        """)
+        
+        for v in ventes:
+            curseur.execute("""
+                INSERT INTO ventes_cloud_gerant 
+                (cle_boutique, id_local, client, article, description_unique, montant_ht, tva, total_ttc, caissiere, date_vente)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """, (cle_boutique, v["id_local"], v["client"], v["article"], v["description_unique"], v["montant_ht"], v["tva"], v["total_ttc"], v["caissiere"], v["date_vente"]))
+            ids_reussis.append(v["id_local"])
+            
+        conn.commit()
+        curseur.close()
+        conn.close()
         return {"statut": "Succès", "ids_synchonises": ids_reussis}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erreur d'écriture Postgres : {str(e)}")
 
 
+
 @app.post("/ventes/synchroniser", dependencies=[Depends(verifier_cle_api)])
 def api_centraliser_vente(donnees: VenteSchemaReseau, x_api_key: str = Header(...)):
-    """Reçoit une vente unitaire depuis le comptoir caissière et la grave proprement dans PostgreSQL Cloud."""
+    """Reçoit une vente unitaire depuis le comptoir caissière et la grave dans PostgreSQL Cloud."""
     cle_boutique = x_api_key.strip()
     try:
         donnees.caissiere = donnees.caissiere.strip().lower()
-        
-        quantite_entiere = int(float(donnees.quantite))
-        if donnees.prix_ht <= 0 or not 0 < quantite_entiere <= 1000:
+        if donnees.prix_ht <= 0 or not 0 < donnees.quantite <= 1000:
             raise HTTPException(status_code=422, detail="Prix ou quantité invalide.")
             
-        total_ht = donnees.prix_ht * quantite_entiere
+        total_ht = donnees.prix_ht * donnees.quantite
         regime_tva = int(donnees.applique_tva_vente) if donnees.applique_tva_vente is not None else 1
         tva_calculee = total_ht * (19.25 / 100) if regime_tva == 1 else 0.0
         total_ttc = total_ht + tva_calculee
         
         date_facture = datetime.now().strftime("%d/%m/%Y %H:%M")
         
+        # 🟢 EXCLUSIF : Utilisation de 'with' pour forcer la fermeture automatique et immédiate du slot de connexion PostgreSQL
         with obtenir_connexion_postgresql() as conn:
             with conn.cursor() as curseur:
-                # 🟢 SÉCURITÉ INDUSTRIELLE : On force la colonne id_local à accepter le format TEXT pour absorber les UUID sans crasher
-                curseur.execute("""
-                    ALTER TABLE ventes_cloud_gerant ALTER COLUMN id_local TYPE TEXT;
-                """)
-                
                 curseur.execute("""
                     INSERT INTO ventes_cloud_gerant 
                     (cle_boutique, id_local, client, article, description_unique, montant_ht, tva, total_ttc, caissiere, date_vente)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     RETURNING id_local;
-                """, (
-                    cle_boutique, 
-                    str(donnees.reference_locale).strip(), # 🟢 Sauvegardé proprement en format texte UUID
-                    donnees.client.upper(), 
-                    donnees.article.upper(), 
-                    donnees.description_unique, 
-                    total_ht, 
-                    tva_calculee, 
-                    total_ttc, 
-                    donnees.caissiere, 
-                    date_facture
-                ))
+                """, (cle_boutique, donnees.reference_locale, donnees.client.upper(), donnees.article.upper(), donnees.description_unique, total_ht, tva_calculee, total_ttc, donnees.caissiere, date_facture))
                 
                 facture_id_cloud = curseur.fetchone()
                 conn.commit()
         
-        print(f"📡 [CLOUD] Vente unitaire de {donnees.caissiere.upper()} centralisée avec succès !")
+        print(f"📡 [CLOUD] Vente de {donnees.caissiere.upper()} centralisée sur Postgres avec succès !")
         return {"statut": "Synchronisé", "facture_id_cloud": facture_id_cloud}
     except Exception as e: 
         raise HTTPException(status_code=500, detail=f"Erreur d'injection financière Cloud : {str(e)}")
