@@ -2145,7 +2145,9 @@ def lancer_moteur_hybride_synchro_cloud():
                 
             time_system.sleep(30) # Tourne en boucle toutes les 30 secondes en tâche de fond
 
-    threading.Thread(target=boucle_treatment, daemon=True).start()
+        # 🟢 CORRECTION DE SYNTAXE : Lancement avec le bon nom de fonction
+    threading.Thread(target=boucle_traitement, daemon=True).start()
+
 
 # Allumage officiel du logiciel d'usine
 
@@ -2158,21 +2160,28 @@ def rafraichir_donnees_locales_depuis_cloud():
             headers = {"X-API-Key": CLE_API_KASHFLOW}
             
             
-            # 1. Téléchargement et synchronisation des stocks
+            # 1. Téléchargement et synchronisation des stocks (CORRIGÉ SERGE)
             rep_stocks = requests.get(f"{URL_API_KASHFLOW}/boutique/telecharger-stocks", headers=headers, timeout=45)
             if rep_stocks.status_code == 200:
                 articles = rep_stocks.json().get("articles", [])
                 conn = sqlite3.connect(data_base.DB_NAME)
                 conn.execute("DELETE FROM stocks") 
                 for art in articles:
-                    nom_art = art[0] if isinstance(art, list) else art.get("article")
-                    prix_art = art[2] if isinstance(art, list) else art.get("prix_ht")
-                    qte_art = art[3] if isinstance(art, list) else art.get("quantite")
+                    # Extraction robuste qu'il s'agisse d'une liste ou d'un dictionnaire
+                    if isinstance(art, list):
+                        nom_art = art[0]
+                        prix_art = art[2]
+                        qte_art = art[3]
+                    else:
+                        nom_art = art.get("article", "Inconnu")
+                        prix_art = art.get("prix_ht", 0.0)
+                        qte_art = art.get("quantite", 0)
                     
                     conn.execute("INSERT INTO stocks (modele, quantite_dispo, prix_achat, ventes_cumulees) VALUES (?, ?, ?, 0)", 
-                                 (nom_art, qte_art, prix_art))
+                                 (str(nom_art).strip().lower(), int(qte_art), float(prix_art)))
                 conn.commit()
                 conn.close()
+
                 
                 # 🟢 RECHARGE VISUELLE GLOBALISÉE : On force la fenêtre maîtresse à actualiser ses graphiques
                 try:
