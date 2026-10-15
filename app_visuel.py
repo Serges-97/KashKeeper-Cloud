@@ -2153,25 +2153,28 @@ def rafraichir_donnees_locales_depuis_cloud():
             headers = {"X-API-Key": CLE_API_KASHFLOW}
             
             
-            # 1. Téléchargement et synchronisation des stocks (CORRIGÉ SERGE)
+            # 1. Téléchargement et synchronisation des stocks (CORRIGÉ PAR SERGE)
             rep_stocks = requests.get(f"{URL_API_KASHFLOW}/boutique/telecharger-stocks", headers=headers, timeout=45)
             if rep_stocks.status_code == 200:
                 articles = rep_stocks.json().get("articles", [])
                 conn = sqlite3.connect(data_base.DB_NAME)
                 conn.execute("DELETE FROM stocks") 
                 for art in articles:
-                    # Extraction stricte de la liste ordonnée renvoyée par l'API
+                    # Extraction stricte par index si c'est une liste Python
                     if isinstance(art, list) and len(art) >= 4:
                         nom_art = art[0]
-                        p_ht = art[2]
-                        qte = art[3]
+                        prix_art = art[2]
+                        qte_art = art[3]
+                    elif isinstance(art, dict):
+                        nom_art = art.get("article", "Inconnu")
+                        prix_art = art.get("prix_ht", 0.0)
+                        qte_art = art.get("quantite", 0)
                     else:
-                        nom_art = art.get("article", "Inconnu") if isinstance(art, dict) else "Inconnu"
-                        p_ht = art.get("prix_ht", 0.0) if isinstance(art, dict) else 0.0
-                        qte = art.get("quantite", 0) if isinstance(art, dict) else 0
+                        continue
                     
+                    # Insertion propre du nom pur de l'article dans la base SQLite locale
                     conn.execute("INSERT INTO stocks (modele, quantite_dispo, prix_achat, ventes_cumulees) VALUES (?, ?, ?, 0)", 
-                                 (str(nom_art).strip().lower(), int(qte), float(p_ht)))
+                                 (str(nom_art).strip().upper(), int(qte_art), float(prix_art)))
                 conn.commit()
                 conn.close()
 
