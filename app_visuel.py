@@ -615,7 +615,7 @@ def ouvrir_panneau_historique():
         tk.Button(pop_detail, text="❌ FERMER", bg="#dc2626", fg="white", font=("Helvetica", 9, "bold"), command=pop_detail.destroy).pack(fill=tk.X, pady=5)
 
     def action_filtrer_par_vendeuse():
-        """Filtre l'historique global en allant chercher l'activité en direct sur le Cloud Render PostgreSQL."""
+        """Indexe directement le Cloud Render PostgreSQL filtré de manière étanche par clé de boutique."""
         nom_vendeuse = normaliser_nom_caissiere(select_vendeuse.get())
         if not nom_vendeuse or nom_vendeuse == "anonyme": return
             
@@ -623,43 +623,39 @@ def ouvrir_panneau_historique():
             grille_audit.delete(i)
             
         valeur_temporelle = entree_cible.get().strip()
-        periode_choisie = select_tempo.get() # "JOUR", "MOIS" ou "ANNEE"
+        periode_choisie = select_tempo.get()
         total_ca_cible = 0.0
         ventes_affichage = []
 
-        # 🟢 LECTURE CLOUD : On interroge Render pour voir l'activité de la caissière à distance
+        # 🟢 APPEL DIRECT CLOUD POSTGRESQL : Étanche et sécurisé
         if URL_API_KASHFLOW and CLE_API_KASHFLOW:
             try:
                 reponse = requests.get(
                     f"{URL_API_KASHFLOW}/ventes/historique-cloud/{nom_vendeuse}",
                     headers={"X-API-Key": CLE_API_KASHFLOW},
-                    timeout=12
+                    timeout=15
                 )
                 if reponse.status_code == 200:
                     donnees_cloud = reponse.json().get("ventes", [])
-                    # Reformatage unifié pour correspondre à la structure de ta grille locale
                     for v in donnees_cloud:
+                        # Alignement avec ta table Postgres (id_local, client, article, total_ttc, date_vente, caissiere)
                         ventes_affichage.append([
                             v["id_local"], v["client"], v["article"], v["total_ttc"],
-                            v["date_vente"], v["caissiere"], v["montant_ht"], v["tva"], v["date_vente"]
+                            v["date_vente"], v["caissiere"]
                         ])
             except Exception as e:
-                print(f"⚠️ Serveur injoignable pour le filtrage, repli local : {e}")
+                print(f"⚠️ Mode secours local activé : {e}")
 
-        # Sécurité de secours : si Internet est coupé, on lit la mémoire locale de ta machine
         if not ventes_affichage:
-            ventes_filtrees = data_base.recuperer_ventes_par_caissiere(nom_vendeuse)
-            for v in ventes_filtrees:
-                if isinstance(v, (tuple, list)): ventes_affichage.append(v)
+            ventes_affichage = data_base.recuperer_ventes_par_caissiere(nom_vendeuse)
 
-        # Application de ta logique d'origine de tri temporel strict
         for index, v in enumerate(ventes_affichage, start=1):
-            if isinstance(v, (tuple, list)) and len(v) >= 4:
+            if isinstance(v, (tuple, list)) and len(v) >= 5:
                 num_id = v[0]
                 client_nom = str(v[1]).upper()
                 articles_bruts = str(v[2]).upper()
                 net_ttc_total = f"{float(v[3]):,} FCFA" if isinstance(v[3], (int, float)) else str(v[3])
-                date_facture = str(v[4]).strip().split(" ")[0] # On isole la date DD/MM/YYYY du bloc date/heure
+                date_facture = str(v[4]).strip().split(" ")[0]
                 caissiere_emetteur = str(v[5]).upper()
                 
                 if valeur_temporelle:
@@ -670,7 +666,6 @@ def ouvrir_panneau_historique():
                         garder_ligne = True
                     elif periode_choisie == "ANNEE" and date_facture.endswith(valeur_temporelle):
                         garder_ligne = True
-                        
                     if not garder_ligne: continue
 
                 articles_visuels = articles_bruts if len(articles_bruts) < 32 else articles_bruts[:30] + "..."
@@ -679,8 +674,6 @@ def ouvrir_panneau_historique():
                 try:
                     total_ca_cible += float(v[3])
                 except Exception: pass
-            else:
-                grille_audit.insert("", tk.END, values=(str(index), "CLIENT UNIQUE", str(v).upper()[:30], "Voir reçu", "13/10/2026", nom_vendeuse.upper()))
 
         label_ca.config(text=f"📊 CA FILTRÉ ({nom_vendeuse.upper()}) : {total_ca_cible:,} FCFA", bg="#0284c7", fg="white")
 
@@ -1127,7 +1120,7 @@ def ouvrir_comptoir_facturation():
     label_statut_cloud = tk.Label(comptoir, text="📡 VÉRIFICATION DU STATUT RÉSEAU...", font=("Helvetica", 10, "bold"), bg="#1e3a8a", fg="white")
     label_statut_cloud.pack(pady=2)
     
-    btn_test_reseau = tk.Button(comptoir, text="🔄 Tester la liaison Cloud", font=("Helvetica", 8, "bold"), bg="#1e293b", fg="white", command=forcer_test_reseau)
+    btn_test_reseau = tk.Button(comptoir, text="🔄 Actualiser ", font=("Helvetica", 8, "bold"), bg="#1e293b", fg="white", command=forcer_test_reseau)
     btn_test_reseau.pack(pady=2)
     comptoir.after(1000, verifier_connexion_cloud)
 
@@ -2167,20 +2160,21 @@ def rafraichir_donnees_locales_depuis_cloud():
                 conn = sqlite3.connect(data_base.DB_NAME)
                 conn.execute("DELETE FROM stocks") 
                 for art in articles:
-                    # Extraction robuste qu'il s'agisse d'une liste ou d'un dictionnaire
-                    if isinstance(art, list):
+                    # Extraction stricte de la liste ordonnée renvoyée par l'API
+                    if isinstance(art, list) and len(art) >= 4:
                         nom_art = art[0]
-                        prix_art = art[2]
-                        qte_art = art[3]
+                        p_ht = art[2]
+                        qte = art[3]
                     else:
-                        nom_art = art.get("article", "Inconnu")
-                        prix_art = art.get("prix_ht", 0.0)
-                        qte_art = art.get("quantite", 0)
+                        nom_art = art.get("article", "Inconnu") if isinstance(art, dict) else "Inconnu"
+                        p_ht = art.get("prix_ht", 0.0) if isinstance(art, dict) else 0.0
+                        qte = art.get("quantite", 0) if isinstance(art, dict) else 0
                     
                     conn.execute("INSERT INTO stocks (modele, quantite_dispo, prix_achat, ventes_cumulees) VALUES (?, ?, ?, 0)", 
-                                 (str(nom_art).strip().lower(), int(qte_art), float(prix_art)))
+                                 (str(nom_art).strip().lower(), int(qte), float(p_ht)))
                 conn.commit()
                 conn.close()
+
 
                 
                 # 🟢 RECHARGE VISUELLE GLOBALISÉE : On force la fenêtre maîtresse à actualiser ses graphiques

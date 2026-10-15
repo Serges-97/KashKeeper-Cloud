@@ -517,20 +517,22 @@ def api_reception_webhook_campay(payload: dict):
     return {"status": "Ignoré"}
 
 # 🟢 APPLIQUE LA PROTECTION DE LICENCE SUR LES STOCKS :
+# 🟢 TROUVE ET REMPLACE CETTE ROUTE DANS TON API.PY
 @app.get("/boutique/telecharger-stocks", dependencies=[Depends(verifier_cle_api)])
 def api_envoyer_stocks_aux_caissieres(x_api_key: str = Header(...)):
-    """Renvoie la liste complète des stocks dans le format brut lu par app_visuel."""
+    """Renvoie la liste complète des stocks de manière robuste pour l'insertion client."""
     try:
-        conn = obtenir_connexion_postgresql()
-        curseur = conn.cursor()
-        curseur.execute("SELECT article, description_unique, prix_ht, quantite FROM produits_cloud WHERE cle_boutique = %s", (x_api_key.strip(),))
-        articles = curseur.fetchall()
-        curseur.close()
-        conn.close()
+        with obtenir_connexion_postgresql() as conn:
+            with conn.cursor() as curseur:
+                curseur.execute("SELECT article, description_unique, prix_ht, quantite FROM produits_cloud WHERE cle_boutique = %s", (x_api_key.strip(),))
+                articles = curseur.fetchall()
+        
+        # Extraction sécurisée via les clés du RealDictCursor pour éviter les listes brutes
         liste_formatee = [[a["article"], a["description_unique"], a["prix_ht"], a["quantite"]] for a in articles]
         return {"articles": liste_formatee}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 # 🟢 APPLIQUE LA PROTECTION DE LICENCE SUR LES EMPLOYÉS :
 @app.get("/boutique/telecharger-employes", dependencies=[Depends(verifier_cle_api)])
