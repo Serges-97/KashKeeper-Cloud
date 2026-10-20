@@ -247,30 +247,7 @@ def ouvrir_panneau_stock():
         payload = {"modele": str(modele).strip().lower(), "quantite_dispo": int(quantite), "prix_achat": float(prix_achat)}
         threading.Thread(target=lambda: requests.post(f"{URL_API_KASHFLOW}/stocks/mettre_a_jour", json=payload, headers={"X-API-Key": CLE_API_KASHFLOW}, timeout=6), daemon=True).start()
 
-    def action_ajouter_quantite(id_stock_cible, nom_article_cible):
-        qte_a_ajouter = simpledialog.askinteger("Réapprovisionnement", f"Quantité à ajouter pour « {str(nom_article_cible).upper()} » :", parent=admin_stock, minvalue=1)
-        if qte_a_ajouter is None: return
-
-        id_propre = id_stock_cible[0] if isinstance(id_stock_cible, (list, tuple)) else id_stock_cible
-
-        connexion = sqlite3.connect(data_base.DB_NAME)
-        # 1. On applique l'ajout en local
-        connexion.execute("UPDATE stocks SET quantite_dispo = quantite_dispo + ? WHERE id = ?", (qte_a_ajouter, id_propre))
-        # 2. On récupère la nouvelle quantité cumulée totale
-        row = connexion.execute("SELECT quantite_dispo, prix_achat FROM stocks WHERE id = ?", (id_propre,)).fetchone()
-        qte_totale = row[0] if row else qte_a_ajouter
-        p_achat = row[1] if row else 0.0
-        connexion.commit()
-        connexion.close()
-        
-        # 3. 🟢 ON ENVOIE LA QUANTITÉ TOTALE MIROIR SUR LE CLOUD
-        if URL_API_KASHFLOW and CLE_API_KASHFLOW:
-            payload = {"modele": str(nom_article_cible).strip().lower(), "quantite_dispo": int(qte_totale), "prix_achat": float(p_achat)}
-            threading.Thread(target=lambda: requests.post(f"{URL_API_KASHFLOW}/stocks/mettre_a_jour", json=payload, headers={"X-API-Key": CLE_API_KASHFLOW}, timeout=10), daemon=True).start()
-            
-        rafraichir_tableau()
-        messagebox.showinfo("Inventaire mis à jour", f"Le stock total a été augmenté à {qte_totale} pcs et synchronisé !")
-
+  
     def rafraichir_tableau():
         for i in tableau_stocks.get_children():
             tableau_stocks.delete(i)
@@ -279,23 +256,70 @@ def ouvrir_panneau_stock():
             tableau_stocks.insert("", tk.END, iid=str(id_db), values=(str(modele).strip().upper(), f"{quantite} pcs", f"{p_achat:,} FCFA"))
 
     def action_ajouter_quantite(id_stock_cible, nom_article_cible):
-        qte = simpledialog.askinteger("Réapprovisionnement", f"Quantité à ajouter pour « {str(nom_article_cible).upper()} » :", parent=admin_stock, minvalue=1)
-        if qte is None: return
+        """Fusionne le réapprovisionnement local et la propulsion miroir sur le Cloud,
+        en extrayant proprement le nom de l'article pour éteindre le bug des crochets.
+        """
+        # 🟢 DEBLOCAGE DES CROCHETS : On extrait la valeur réelle de la première cellule (Désignation)
+        try:
+            valeurs_ligne = tableau_stocks.item(id_stock_cible)["values"]
+            nom_pur_article = valeurs_ligne[0] if valeurs_ligne else str(nom_article_cible)
+        except Exception:
+            nom_pur_article = str(nom_article_cible)
 
-        # 🟢 CORRIGÉ : Extraction propre de la variable ID
+        # Si le nom extrait contient encore par erreur des résidus de chaîne de caractères list, on nettoie
+        if nom_pur_article.startswith("[") or "'" in nom_pur_article:
+            nom_pur_article = str(nom_article_cible).strip()
+
+        qte_a_ajouter = simpledialog.askinteger(
+            "Réapprovisionnement", 
+            f"Quantité à ajouter pour « {str(nom_pur_article).upper()} » :", 
+            parent=admin_stock, 
+            minvalue=1
+        )
+        if qte_a_ajouter is None: 
+            return
+
+        # Extraction sécurisée de l'ID unique SQLite
         id_propre = id_stock_cible[0] if isinstance(id_stock_cible, (list, tuple)) else id_stock_cible
 
-        connexion = sqlite3.connect(data_base.DB_NAME)
-        connexion.execute("UPDATE stocks SET quantite_dispo = quantite_dispo + ? WHERE id = ?", (qte, id_propre))
-        row = connexion.execute("SELECT quantite_dispo, prix_achat FROM stocks WHERE id = ?", (id_propre,)).fetchone()
-        qte_totale = row[0] if row else qte
-        p_achat = row[1] if row else 0.0
-        connexion.commit()
-        connexion.close()
-        
-        pushing_stock_cloud_complet(str(nom_article_cible).strip().lower(), qte_totale, p_achat)
-        rafraichir_tableau()
-        messagebox.showinfo("Inventaire mis à jour", "Stock augmenté avec succès.")
+        try:
+            connexion = sqlite3.connect(data_base.DB_NAME)
+            # 1. On applique l'ajout sur le disque dur local
+            connexion.execute("UPDATE stocks SET quantite_dispo = quantite_dispo + ? WHERE id = ?", (qte_a_ajouter, id_propre))
+            
+            # 2. On récupère la nouvelle quantité cumulée totale et le prix d'achat
+            row = connexion.execute("SELECT quantite_dispo, prix_achat FROM stocks WHERE id = ?", (id_propre,)).fetchone()
+            qte_totale = row[0] if row else qte_a_ajouter
+            p_achat = row[1] if row else 0.0
+            connexion.commit()
+            connexion.close()
+            
+            # 3. 🟢 PROPULSION MIROIR SUR LE CLOUD POSTGRESQL (Sans aucune corruption de type)
+            if URL_API_KASHFLOW and CLE_API_KASHFLOW:
+                payload = {
+                    "modele": str(nom_pur_article).strip().lower(), 
+                    "quantite_dispo": int(qte_totale), 
+                    "prix_achat": float(p_achat)
+                }
+                def pousser_quantite_miroir():
+                    try:
+                        requests.post(
+                            f"{URL_API_KASHFLOW}/stocks/mettre_a_jour", 
+                            json=payload, 
+                            headers={"X-API-Key": CLE_API_KASHFLOW}, 
+                            timeout=12
+                        )
+                        print(f"📡 [CLOUD] Stock absolu de {str(nom_pur_article).upper()} synchronisé à {qte_totale} pcs.")
+                    except Exception as e:
+                        print(f"⚠️ [CLOUD] Échec synchro immédiate stock, conservé en local : {e}")
+
+                threading.Thread(target=pousser_quantite_miroir, daemon=True).start()
+                
+            rafraichir_tableau()
+            messagebox.showinfo("Inventaire mis à jour", f"Le stock de '{str(nom_pur_article).upper()}' a été augmenté à {qte_totale} pcs avec succès !")
+            
+        except Exception as err:
+            messagebox.showerror("Erreur système", f"Impossible d'ajuster le stock : {err}")
 
     def action_ajouter_modele():
         modele = entree_modele.get().strip().lower()
@@ -615,7 +639,9 @@ def ouvrir_panneau_historique():
         tk.Button(pop_detail, text="❌ FERMER", bg="#dc2626", fg="white", font=("Helvetica", 9, "bold"), command=pop_detail.destroy).pack(fill=tk.X, pady=5)
 
     def action_filtrer_par_vendeuse():
-        """Indexe directement le Cloud Render PostgreSQL filtré de manière étanche par clé de boutique."""
+        """Indexe le Cloud Render PostgreSQL, enregistre automatiquement une copie conforme 
+        dans la base locale du gérant, et rafraîchit l'affichage via ta logique d'origine.
+        """
         nom_vendeuse = normaliser_nom_caissiere(select_vendeuse.get())
         if not nom_vendeuse or nom_vendeuse == "anonyme": return
             
@@ -627,7 +653,7 @@ def ouvrir_panneau_historique():
         total_ca_cible = 0.0
         ventes_affichage = []
 
-        # 🟢 APPEL DIRECT CLOUD POSTGRESQL : Étanche et sécurisé
+        # 1. ASPIRATION DEPUIS LE CLOUD ET ÉCRITURE EN BASE LOCAL SANS DOUBLONS
         if URL_API_KASHFLOW and CLE_API_KASHFLOW:
             try:
                 reponse = requests.get(
@@ -637,26 +663,54 @@ def ouvrir_panneau_historique():
                 )
                 if reponse.status_code == 200:
                     donnees_cloud = reponse.json().get("ventes", [])
+                    
+                    conn_local = sqlite3.connect(data_base.DB_NAME)
+                    curseur_local = conn_local.cursor()
+                    
                     for v in donnees_cloud:
-                        # Alignement avec ta table Postgres (id_local, client, article, total_ttc, date_vente, caissiere)
-                        ventes_affichage.append([
-                            v["id_local"], v["client"], v["article"], v["total_ttc"],
-                            v["date_vente"], v["caissiere"]
-                        ])
+                        chaine_date_brute = str(v.get("date_vente", "")).strip()
+                        if " " in chaine_date_brute:
+                            composants = chaine_date_brute.split(" ")
+                            jour_mois_annee = composants[0]
+                            heure_minute = composants[1]
+                        else:
+                            jour_mois_annee = chaine_date_brute if chaine_date_brute else "19/10/2026"
+                            heure_minute = "12:00"
+                            
+                        elements_date = jour_mois_annee.split("/")
+                        j = elements_date[0] if len(elements_date) > 0 else "19"
+                        m = elements_date[1] if len(elements_date) > 1 else "10"
+                        a = elements_date[2] if len(elements_date) > 2 else "2026"
+
+                        curseur_local.execute("""
+                            INSERT INTO ventes (reference_locale, client, article, description_unique, montant_ht, tva, total_ttc, caissiere, jour, mois, annee, heure, synchro)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                            ON CONFLICT(reference_locale) DO NOTHING
+                        """, (
+                            str(v.get("id_local")), str(v.get("client")), str(v.get("article")), str(v.get("description_unique")),
+                            float(v.get("montant_ht", 0.0)), float(v.get("tva", 0.0)), float(v.get("total_ttc", 0.0)), str(v.get("caissiere")),
+                            j, m, a, heure_minute
+                        ))
+                    conn_local.commit()
+                    conn_local.close()
             except Exception as e:
                 print(f"⚠️ Mode secours local activé : {e}")
 
-        if not ventes_affichage:
-            ventes_affichage = data_base.recuperer_ventes_par_caissiere(nom_vendeuse)
+        # 2. RESTAURATION INTÉGRALE DE TA LOGIQUE DE TRI D'ORIGINE STABLE
+        ventes_filtrees = data_base.recuperer_ventes_par_caissiere(nom_vendeuse)
+        for v in ventes_filtrees:
+            if isinstance(v, (tuple, list)): 
+                ventes_affichage.append(v)
 
         for index, v in enumerate(ventes_affichage, start=1):
-            if isinstance(v, (tuple, list)) and len(v) >= 5:
+            if isinstance(v, (tuple, list)) and len(v) >= 4:
                 num_id = v[0]
                 client_nom = str(v[1]).upper()
                 articles_bruts = str(v[2]).upper()
-                net_ttc_total = f"{float(v[3]):,} FCFA" if isinstance(v[3], (int, float)) else str(v[3])
-                date_facture = str(v[4]).strip().split(" ")[0]
-                caissiere_emetteur = str(v[5]).upper()
+                net_ttc_total = f"{float(v[6]):,} FCFA" if len(v) > 6 else f"{float(v[3]):,} FCFA"
+                
+                date_facture = str(v[8]).strip() if len(v) > 8 else (str(v[4]).strip() if len(v) > 4 else "19/10/2026")
+                caissiere_emetteur = str(v[7]).upper() if len(v) > 7 else (str(v[5]).upper() if len(v) > 5 else nom_vendeuse.upper())
                 
                 if valeur_temporelle:
                     garder_ligne = False
@@ -666,14 +720,18 @@ def ouvrir_panneau_historique():
                         garder_ligne = True
                     elif periode_choisie == "ANNEE" and date_facture.endswith(valeur_temporelle):
                         garder_ligne = True
+                        
                     if not garder_ligne: continue
 
                 articles_visuels = articles_bruts if len(articles_bruts) < 32 else articles_bruts[:30] + "..."
                 grille_audit.insert("", tk.END, values=(num_id, client_nom, articles_visuels, net_ttc_total, date_facture, caissiere_emetteur))
                 
                 try:
-                    total_ca_cible += float(v[3])
+                    prix_brut = float(v[6]) if len(v) > 6 else float(v[3])
+                    total_ca_cible += prix_brut
                 except Exception: pass
+            else:
+                grille_audit.insert("", tk.END, values=(str(index), "CLIENT UNIQUE", str(v).upper()[:30], "Voir reçu", "19/10/2026", nom_vendeuse.upper()))
 
         label_ca.config(text=f"📊 CA FILTRÉ ({nom_vendeuse.upper()}) : {total_ca_cible:,} FCFA", bg="#0284c7", fg="white")
 
@@ -791,9 +849,6 @@ def ouvrir_panneau_historique():
     defilement_audit.pack(side=tk.RIGHT, fill=tk.Y)
 
     action_afficher_tout_historique()
-
-    
-    
     
 # =====================================================================
 # MODULE 4 : app_visuel.py (Version Multi-Postes Pro - ÉTAPE 9 SUR 15)
@@ -962,8 +1017,6 @@ def ouvrir_panneau_employes():
     tk.Button(cadre_act_rh, text="🗑️ RETIRER DU REGISTRE PERSONNEL", bg="#dc2626", fg="white", font=("Helvetica", 9, "bold"), command=action_supprimer_employe_grille).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 0))
 
     rafraichir_liste_employes()
-
-
 
 # =====================================================================
 # MODULE 4 : app_visuel.py (Version Multi-Postes Pro - ÉTAPE 10 SUR 15)
