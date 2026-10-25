@@ -2161,13 +2161,23 @@ def lancer_moteur_hybride_synchro_cloud():
                 """).fetchall()
                 conn.close()
                 
+                # 🟢 BLOC CORRIGÉ LIGNE 2125 DE APP_VISUEL.PY : ON EMBALLE LA QUANTITÉ
                 if ventes_locales and URL_API_KASHFLOW and CLE_API_KASHFLOW:
                     paquet_ventes = []
                     for v in ventes_locales:
                         paquet_ventes.append({
-                            "id_local": v[0], "client": v[1], "article": v[2], "description_unique": v[3],
-                            "montant_ht": v[4], "tva": v[5], "total_ttc": v[6], "caissiere": v[7], "date_vente": v[8]
+                            "id_local": v[0],
+                            "client": v[1],
+                            "article": v[2],
+                            "description_unique": v[3],
+                            "montant_ht": v[4],
+                            "tva": v[5],
+                            "total_ttc": v[6],
+                            "caissiere": v[7],
+                            "date_vente": v[8],
+                            "quantite": int(v[8]) # 🟢 LA SÉCURITÉ INCONTOURNABLE ICI
                         })
+
                     
                     # 2. 🟢 EXPÉDITION AVEC HEADER SÉCURISÉ : On fournit le badge pour franchir le filtre verifier_cle_api
                     reponse = requests.post(

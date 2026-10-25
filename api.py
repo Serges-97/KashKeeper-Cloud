@@ -239,7 +239,7 @@ def api_synchroniser_ventes_postgres(payload: dict, x_api_key: str = Header(...)
                 """)
                 
                 for v in ventes:
-                    # 1. Insertion unifiée dans le grand registre comptable du Gérant
+                    # 1. Enregistrement de la transaction dans l'historique du gérant
                     curseur.execute("""
                         INSERT INTO ventes_cloud_gerant 
                         (cle_boutique, id_local, client, article, description_unique, montant_ht, tva, total_ttc, caissiere, date_vente)
@@ -257,19 +257,12 @@ def api_synchroniser_ventes_postgres(payload: dict, x_api_key: str = Header(...)
                         str(v["date_vente"]).strip()
                     ))
                     
-                    # 2. 🟢 DÉDUCTION AUTOMATIQUE DU STOCK CLOUD DE LA BOUTIQUE CIBLE
+                    # 2. 🟢 DÉDUCTION AUTOMATIQUE DU STOCK CLOUD ÉTANCHE
                     nom_article_brut = str(v["article"]).strip().lower()
                     nom_article_pur = nom_article_brut.split(" (x")[0].split("(")[0].strip()
                     
-                    quantite_vendue = 1
-                    if "(x" in nom_article_brut:
-                        try:
-                            quantite_vendue = int(nom_article_brut.split("(x")[1].split(")")[0].strip())
-                        except Exception: pass
-                    elif "( " in nom_article_brut:
-                        try:
-                            quantite_vendue = int(nom_article_brut.split("( ")[1].split(")")[0].strip())
-                        except Exception: pass
+                    # On lit la quantité envoyée par le paquet de l'interface graphique
+                    quantite_vendue = int(v.get("quantite", 1))
 
                     curseur.execute("""
                         UPDATE produits_cloud 
