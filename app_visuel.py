@@ -1121,13 +1121,24 @@ def ouvrir_comptoir_facturation():
         except Exception: pass
 
     def planifier_synchronisation_et_ecoute():
-        """Planifie la synchronisation transparente des données d'inventaire sans bloquer l'affichage."""
+        """Moteur d'écoute automatique. Rafraîchit les stocks et la file cloud toutes les 7 secondes."""
         if comptoir.winfo_exists():
-            # 🟢 Exécution forcée dans des fils indépendants (Threads) pour éviter les saccades ou blocages
+            # ACTIVATION DES THREADS AUTOMATIQUES SANS FREEZE
             threading.Thread(target=synchroniser_file_cloud, daemon=True).start()
             threading.Thread(target=rafraichir_stocks_depuis_cloud, daemon=True).start()
-            # Actualisation douce toutes les 2 minutes (120 000 millisecondes) pour stabiliser le réseau gratuit
-            comptoir.after(120000, planifier_synchronisation_et_ecoute)
+            
+            # 2. 🟢 SÉCURITÉ PORTÉE COMPLÈTE : Appel dynamique pour éteindre l'alerte rafraichir_tableau
+            try:
+                if "admin_stock" in globals() and globals()["admin_stock"].winfo_exists():
+                    if "rafraichir_tableau" in globals():
+                        globals()["rafraichir_tableau"]()
+            except Exception:
+                pass
+
+                
+            # CYCLE AUTOMATIQUE DE 7 SECONDES (Fini le clic manuel !)
+            comptoir.after(7000, planifier_synchronisation_et_ecoute)
+
 
 
     tk.Label(comptoir, text=f"{nom_boutique_fixe} - COMPTOIR DE FACTURATION", font=("Helvetica", 12, "bold"), bg="#0f766e", fg="white", pady=8).pack(fill=tk.X)

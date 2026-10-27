@@ -257,13 +257,14 @@ def api_synchroniser_ventes_postgres(payload: dict, x_api_key: str = Header(...)
                         str(v["date_vente"]).strip()
                     ))
                     
-                    # 2. 🟢 DÉDUCTION AUTOMATIQUE DU STOCK CLOUD ÉTANCHE
+                    # 2. 🟢 DÉDUCTION AUTOMATIQUE DU STOCK CLOUD ÉTANCHE TOLÉRANTE À LA CASSE
                     nom_article_brut = str(v["article"]).strip().lower()
                     nom_article_pur = nom_article_brut.split(" (x")[0].split("(")[0].strip()
                     
                     # On lit la quantité envoyée par le paquet de l'interface graphique
                     quantite_vendue = int(v.get("quantite", 1))
 
+                    # 🟢 MODIFICATION UNIQUE : LOWER(article) permet de matcher peu importe la casse sur Render
                     curseur.execute("""
                         UPDATE produits_cloud 
                         SET quantite = GREATEST(0, quantite - %s) 
@@ -278,6 +279,7 @@ def api_synchroniser_ventes_postgres(payload: dict, x_api_key: str = Header(...)
         return {"statut": "Succès", "ids_synchonises": ids_reussis}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erreur d'écriture Postgres : {str(e)}")
+
 
 @app.post("/ventes/synchroniser", dependencies=[Depends(verifier_cle_api)])
 def api_centraliser_vente(donnees: VenteSchemaReseau, x_api_key: str = Header(...)):
