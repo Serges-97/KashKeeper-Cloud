@@ -210,9 +210,10 @@ class StockSchemaReseau(BaseModel):
 
 @app.post("/sync/ventes_magasin", dependencies=[Depends(verifier_cle_api)])
 def api_synchroniser_ventes_postgres(payload: dict, x_api_key: str = Header(...)):
-    """Reçoit les ventes locales de la caissière, met à jour dynamiquement l'inventaire 
-    centralisé produits_cloud et enregistre les transactions dans PostgreSQL Cloud.
+    """Reçoit le paquet de ventes locales de la caissière, extrait proprement le nom pur
+    du modèle, déduit l'inventaire Cloud produits_cloud de manière insensible à la casse.
     """
+    import re
     cle_boutique = x_api_key.strip()
     ventes = payload.get("ventes", [])
     ids_reussis = []
@@ -225,7 +226,7 @@ def api_synchroniser_ventes_postgres(payload: dict, x_api_key: str = Header(...)
                 curseur.execute("""
                     CREATE TABLE IF NOT EXISTS ventes_cloud_gerant (
                         id SERIAL PRIMARY KEY,
-                        cle_boutique TEXT,
+                        cle_boutique TEXT NOT NULL,
                         id_local TEXT,
                         client TEXT,
                         article TEXT,
@@ -239,7 +240,9 @@ def api_synchroniser_ventes_postgres(payload: dict, x_api_key: str = Header(...)
                 """)
                 
                 for v in ventes:
-                    # 1. Enregistrement de la transaction dans l'historique du gérant
+                    article_brut = str(v["article"]).strip().upper()
+                    
+                    # 1. Enregistrement de la transaction dans le grand livre comptable du gérant
                     curseur.execute("""
                         INSERT INTO ventes_cloud_gerant 
                         (cle_boutique, id_local, client, article, description_unique, montant_ht, tva, total_ttc, caissiere, date_vente)
@@ -248,7 +251,7 @@ def api_synchroniser_ventes_postgres(payload: dict, x_api_key: str = Header(...)
                         cle_boutique, 
                         str(v["id_local"]).strip(), 
                         str(v["client"]).upper(), 
-                        str(v["article"]).upper(), 
+                        article_brut, 
                         str(v["description_unique"]).upper(), 
                         float(v["montant_ht"]), 
                         float(v["tva"]), 
@@ -257,14 +260,22 @@ def api_synchroniser_ventes_postgres(payload: dict, x_api_key: str = Header(...)
                         str(v["date_vente"]).strip()
                     ))
                     
-                    # 2. 🟢 DÉDUCTION AUTOMATIQUE DU STOCK CLOUD ÉTANCHE TOLÉRANTE À LA CASSE
-                    nom_article_brut = str(v["article"]).strip().lower()
-                    nom_article_pur = nom_article_brut.split(" (x")[0].split("(")[0].strip()
+                    # 2. 🟢 NETTOYAGE ULTRA-ROBUSTE DU NOM DU MODÈLE POUR LA DÉDUCTION DU STOCK
+                    # Si l'article est "ITEL A30 (X1)", on extrait strictement "itel a30"
+                    nom_article_nettoye = article_brut
+                    if " (X" in article_brut or " (x" in article_brut:
+                        nom_article_nettoye = article_brut.split(" (X")[0].split(" (x")[0]
+                    elif "(" in article_brut:
+                        nom_article_nettoye = article_brut.split("(")[0]
+                        
+                    nom_article_pur = nom_article_nettoye.strip().lower()
                     
-                    # On lit la quantité envoyée par le paquet de l'interface graphique
+                    # Récupération de la quantité vendue passée par le client
                     quantite_vendue = int(v.get("quantite", 1))
+                    if quantite_vendue <= 0:
+                        quantite_vendue = 1
 
-                    # 🟢 MODIFICATION UNIQUE : LOWER(article) permet de matcher peu importe la casse sur Render
+                    # Déduction comptable sur le Cloud PostgreSQL
                     curseur.execute("""
                         UPDATE produits_cloud 
                         SET quantite = GREATEST(0, quantite - %s) 
