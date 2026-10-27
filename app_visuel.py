@@ -1329,7 +1329,14 @@ def ouvrir_comptoir_facturation():
                 caissiere_nom, reference_locale
             )
 
+
             if num_facture:
+                # 🟢 FORCE LE TIROIR-CAISSE À REPEINDRE LA LISTE DÉROULANTE IMMÉDIATEMENT POUR ÉVITER L'ÉCRASEMENT DES 7s
+                try:
+                    actualiser_liste_deroulante_smartphones()
+                except Exception:
+                    pass
+
                 panier_virtuel_unique = [{
                     "article": smartphone,
                     "description_unique": string_desc,
@@ -1337,7 +1344,6 @@ def ouvrir_comptoir_facturation():
                     "montant_ht": calcul["montant_ht"],
                     "total_ttc": calcul["total_ttc"]
                 }]
-
                 operation.generer_recu_pdf_industriel(
                     nom_boutique, num_facture, nom_client, "SANS_TEL", 
                     panier_virtuel_unique, caissiere_nom, 
@@ -1381,11 +1387,17 @@ def ouvrir_comptoir_facturation():
                 )
 
                 if num_facture:
-                    operation.generer_facture_gros_pdf_industriel(
-                        nom_boutique, num_facture, nom_client, 
-                        PANIER_FACTURE_EN_COURS, caissiere_nom, 
-                        general_ht, general_tva, general_ttc
-                    )
+                    # 🟢 ON VERROUILLE L'AFFICHAGE AVANT QUE LE CLOUD NE RÉPONDE
+                    try:
+                        # Déduction miroir forcée en local pour chaque article du panier de gros
+                        conn_pur = sqlite3.connect(data_base.DB_NAME)
+                        for p in PANIER_FACTURE_EN_COURS:
+                            conn_pur.execute("UPDATE stocks SET quantite_dispo = GREATEST(0, quantite_dispo - ?) WHERE LOWER(modele) = ?", (int(p["quantite"]), str(p["article"]).strip().lower()))
+                        conn_pur.commit()
+                        conn_pur.close()
+                        actualiser_liste_deroulante_smartphones()
+                    except Exception:
+                        pass
 
                     # 🟢 CAS N°2 : FACTURE DE GROS - IMPRESSION THERMIQUE DIRECTE SÉCURISÉE
                     try:
