@@ -260,11 +260,12 @@ def api_synchroniser_ventes_postgres(payload: dict, x_api_key: str = Header(...)
                         str(v["date_vente"]).strip()
                     ))
                     
-                    # 2. 🟢 NETTOYAGE ULTRA-ROBUSTE DU NOM DU MODÈLE POUR LA DÉDUCTION DU STOCK
-                    # Si l'article est "ITEL A30 (X1)", on extrait strictement "itel a30"
+                    # 2. 🟢 CORRECTIF DE DECOUPAGE STR : Nettoyage sécurisé du nom de l'article pour le stock cloud
                     nom_article_nettoye = article_brut
-                    if " (X" in article_brut or " (x" in article_brut:
-                        nom_article_nettoye = article_brut.split(" (X")[0].split(" (x")[0]
+                    if " (X" in article_brut:
+                        nom_article_nettoye = article_brut.split(" (X")[0]
+                    elif " (X" in article_brut:
+                        nom_article_nettoye = article_brut.split(" (X")[0]
                     elif "(" in article_brut:
                         nom_article_nettoye = article_brut.split("(")[0]
                         
@@ -283,6 +284,7 @@ def api_synchroniser_ventes_postgres(payload: dict, x_api_key: str = Header(...)
                     """, (quantite_vendue, cle_boutique, nom_article_pur))
                     
                     ids_reussis.append(v["id_local"])
+
                     
                 conn.commit()
                 
