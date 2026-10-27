@@ -2158,7 +2158,7 @@ btn_abonnement.pack(side=tk.RIGHT)
 
 def lancer_moteur_hybride_synchro_cloud():
     """Thread invisible de production. Propulse les paquets de ventes locales vers 
-    Render PostgreSQL dès qu'un filet d'Internet est actif en y incluant la clé API d'accès.
+    Render PostgreSQL avec extraction stricte des index pour éviter les rejets 500.
     """
     def boucle_traitement():
         import time as time_system
@@ -2172,25 +2172,33 @@ def lancer_moteur_hybride_synchro_cloud():
                 """).fetchall()
                 conn.close()
                 
-                # 🟢 BLOC CORRIGÉ LIGNE 2125 DE APP_VISUEL.PY : ON EMBALLE LA QUANTITÉ
                 if ventes_locales and URL_API_KASHFLOW and CLE_API_KASHFLOW:
                     paquet_ventes = []
                     for v in ventes_locales:
-                        paquet_ventes.append({
-                            "id_local": v[0],
-                            "client": v[1],
-                            "article": v[2],
-                            "description_unique": v[3],
-                            "montant_ht": v[4],
-                            "tva": v[5],
-                            "total_ttc": v[6],
-                            "caissiere": v[7],
-                            "date_vente": v[8],
-                            "quantite": int(v[8]) # 🟢 LA SÉCURITÉ INCONTOURNABLE ICI
-                        })
+                        # 🟢 ISOLATION DU CHIFFRE DE QUANTITÉ COMPTABLE DEPUIS LA CHAÎNE (ex: "IPHONE (x1)" -> 1)
+                        chaine_article = str(v[2]).upper()
+                        qte_extraite = 1
+                        if "(X" in chaine_article:
+                            try: qte_extraite = int(chaine_article.split("(X")[1].split(")")[0].strip())
+                            except Exception: pass
+                        elif "(x" in chaine_article:
+                            try: qte_extraite = int(chaine_article.split("(x")[1].split(")")[0].strip())
+                            except Exception: pass
 
+                        paquet_ventes.append({
+                            "id_local": str(v[0]),             # ID unique de la transaction locale
+                            "client": str(v[1]).upper(),       # Nom du client
+                            "article": chaine_article,         # Libellé complet (ex: ITEL A30 (x1))
+                            "description_unique": str(v[3]),   # IMEI / SAV
+                            "montant_ht": float(v[4]),         # Total Financier HT
+                            "tva": float(v[5]),
+                            "total_ttc": float(v[6]),
+                            "caissiere": str(v[7]).lower(),    # Identifiant caisse
+                            "date_vente": str(v[8]),           # Date et Heure
+                            "quantite": qte_extraite          # 🟢 QUANTITÉ SÉCURISÉE ENVOYÉE AU SERVEUR CLOUD
+                        })
                     
-                    # 2. 🟢 EXPÉDITION AVEC HEADER SÉCURISÉ : On fournit le badge pour franchir le filtre verifier_cle_api
+                    # 2. EXPÉDITION AVEC HEADER SÉCURISÉ
                     reponse = requests.post(
                         f"{URL_API_KASHFLOW}/sync/ventes_magasin",
                         json={"ventes": paquet_ventes},
@@ -2203,17 +2211,21 @@ def lancer_moteur_hybride_synchro_cloud():
                         ids_a_marquer = reponse.json().get("ids_synchonises", [])
                         conn_up = sqlite3.connect(data_base.DB_NAME)
                         for id_l in ids_a_marquer:
-                            conn_up.execute("UPDATE ventes SET synchro = 1 WHERE id = ?", (id_l,))
+                            # Comme id_local a été envoyé en string, on reconvertit en entier pour SQLite
+                            if str(id_l).isdigit():
+                                conn_up.execute("UPDATE ventes SET synchro = 1 WHERE id = ?", (int(id_l),))
                         conn_up.commit()
                         conn_up.close()
-                        print(f"📡 [MOTEUR HYBRIDE] Propulsion réussie de {len(ids_a_marquer)} transactions au Cloud !")
+                        print(f"📡 [MOTEUR HYBRIDE] Propulsion réussie de {len(paquet_ventes)} transactions au Cloud !")
+                    else:
+                        print(f"⚠️ [MOTEUR HYBRIDE] Rejet du serveur Cloud, code statut : {reponse.status_code}")
             except Exception as e:
                 print(f"⚠️ [MOTEUR HYBRIDE] Attente réseau ou serveur occupé : {e}")
                 
             time_system.sleep(30) # Tourne en boucle toutes les 30 secondes en tâche de fond
 
-        # 🟢 CORRECTION DE SYNTAXE : Lancement avec le bon nom de fonction
     threading.Thread(target=boucle_traitement, daemon=True).start()
+
 
 
 # Allumage officiel du logiciel d'usine
